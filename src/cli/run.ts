@@ -26,7 +26,7 @@ const EXIT_LOOP_DETECTED = 2;
 const EXIT_TTL_EXCEEDED = 3;
 
 // ─── Agent ──────────────────────────────────────────────────────────────────────
-import { agent } from '../agents/echo.js';
+import { createAgent } from '../agents/echo.js';
 
 // ─── Base LLM call via Anthropic Messages API ──────────────────────────────────
 const baseLlmCall: LlmCallFn = async (
@@ -249,7 +249,8 @@ async function main(): Promise<void> {
   // ── Steps 14–18: Run agent and handle outcomes ────────────────────────────
   try {
     // Step 14: Call agent
-    const result = await agent(wrappedLlmCall, toolContext);
+    const agentFn = createAgent(taskPayload);
+    const result = await agentFn(wrappedLlmCall, toolContext);
     console.log(JSON.stringify({ event: 'agent_completed', runId, finalMessage: result.finalMessage, timestamp: new Date().toISOString() }));
 
     // Step 15: Clean completion

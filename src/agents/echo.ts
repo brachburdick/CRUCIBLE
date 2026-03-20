@@ -1,10 +1,12 @@
-import type { AgentFn, LlmMessage } from '../types/index.js';
+import type { AgentFn, LlmMessage, TaskPayload } from '../types/index.js';
 
 const MAX_TURNS = 50;
 const DONE_MARKER = 'TASK_COMPLETE';
 
 /**
- * Echo agent — agentic loop that sends task instructions to the LLM,
+ * Creates an echo agent bound to a specific task payload.
+ *
+ * The returned AgentFn sends the task instructions to the LLM,
  * follows the LLM's lead on tool use, and terminates when the LLM
  * signals completion or the turn limit is reached.
  *
@@ -12,7 +14,8 @@ const DONE_MARKER = 'TASK_COMPLETE';
  * looping tasks (the task instructions cause the LLM to repeat itself,
  * triggering the loop detector middleware).
  */
-export const agent: AgentFn = async (llmCall, tools) => {
+export function createAgent(task: TaskPayload): AgentFn {
+  return async (llmCall, tools) => {
   const messages: LlmMessage[] = [
     {
       role: 'system',
@@ -27,7 +30,7 @@ export const agent: AgentFn = async (llmCall, tools) => {
     },
     {
       role: 'user',
-      content: 'Here is your task. Follow the instructions exactly.',
+      content: `Task: ${task.description}\n\nInstructions: ${task.instructions}`,
     },
   ];
 
@@ -85,4 +88,5 @@ export const agent: AgentFn = async (llmCall, tools) => {
     finalMessage: lastResponse,
     artifacts: writtenFiles.length > 0 ? writtenFiles : undefined,
   };
-};
+  };
+}
