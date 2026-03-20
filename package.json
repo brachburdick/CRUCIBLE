@@ -8,7 +8,8 @@
   },
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:integration": "./scripts/integration-test.sh"
   },
   "dependencies": {
     "commander": "^13.1.0",
