@@ -1,0 +1,4 @@
+{
+  "description": "Write a haiku about programming to a file",
+  "instructions": "Write a haiku about programming. Use WRITE_FILE:haiku.txt:<your haiku> to save it. Then use EXEC:cat haiku.txt to verify it was written. Once verified, include TASK_COMPLETE in your response."
+}

@@ -1,0 +1,23 @@
+{
+  "name": "crucible",
+  "version": "0.1.0",
+  "description": "Sandboxed agent evaluation harness for testing and comparing AI orchestration pipeline variants",
+  "type": "module",
+  "bin": {
+    "crucible": "./dist/cli/run.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "commander": "^13.1.0",
+    "e2b": "^1.2.0",
+    "langfuse": "^3.38.0",
+    "openai": "^4.85.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/node": "^22.13.0"
+  }
+}

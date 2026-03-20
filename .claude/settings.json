@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hook": ".claude/hooks/fix-node-cmd.sh",
+        "description": "Rewrite node to npx tsx for .ts files"
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hook": ".claude/hooks/subagent-stop.sh",
+        "description": "Verify session summary exists before subagent completion"
+      }
+    ]
+  }
+}
