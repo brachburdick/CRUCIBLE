@@ -1,0 +1,34 @@
+#!/usr/bin/env node
+
+import { Command } from 'commander';
+import { RunEngine } from '../engine/RunEngine.js';
+import { openDatabase } from './db.js';
+import { createServer } from './index.js';
+
+async function main(): Promise<void> {
+  const program = new Command();
+
+  program
+    .name('crucible-serve')
+    .description('Start the CRUCIBLE web UI server')
+    .option('--port <number>', 'Port to listen on', '3100')
+    .parse(process.argv);
+
+  const opts = program.opts<{ port: string }>();
+  const port = Number(opts.port);
+
+  const engine = new RunEngine();
+  const db = openDatabase();
+
+  const server = await createServer({ port, engine, db });
+  const address = server.addresses()[0];
+
+  console.log(`CRUCIBLE server running at http://localhost:${address?.port ?? port}`);
+  console.log(`  API:       http://localhost:${address?.port ?? port}/api/runs`);
+  console.log(`  WebSocket: ws://localhost:${address?.port ?? port}/api/ws`);
+}
+
+main().catch((err) => {
+  console.error('Failed to start server:', err instanceof Error ? err.message : String(err));
+  process.exit(1);
+});

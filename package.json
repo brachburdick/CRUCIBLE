@@ -9,16 +9,23 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
+    "serve": "node dist/server/serve.js",
     "test:integration": "./scripts/integration-test.sh"
   },
   "dependencies": {
+    "@fastify/static": "^9.0.0",
+    "@fastify/websocket": "^11.2.0",
+    "better-sqlite3": "^12.8.0",
     "commander": "^13.1.0",
     "e2b": "^1.2.0",
+    "fastify": "^5.8.4",
     "langfuse": "^3.38.0",
     "openai": "^4.85.0"
   },
   "devDependencies": {
-    "typescript": "^5.7.0",
-    "@types/node": "^22.13.0"
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.13.0",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.7.0"
   }
 }

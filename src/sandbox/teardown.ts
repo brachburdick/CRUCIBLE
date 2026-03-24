@@ -21,6 +21,8 @@ export interface TeardownContext {
   getTokenCount: () => number;
   runConfig: RunConfig;
   startedAt: Date;
+  /** Optional event emitter callback. Falls back to console.log/error if not provided. */
+  emit?: (event: string, data: Record<string, unknown>) => void;
 }
 
 /**
@@ -54,7 +56,7 @@ export async function teardown(
   context: TeardownContext,
   killReason: KillReason,
 ): Promise<void> {
-  const { sandboxRunner, tracer, getTokenCount, runConfig, startedAt } =
+  const { sandboxRunner, tracer, getTokenCount, runConfig, startedAt, emit } =
     context;
 
   const runId = tracer.getRunId();
@@ -62,7 +64,23 @@ export async function teardown(
   const completedAt = new Date();
   const wallTimeMs = completedAt.getTime() - startedAt.getTime();
 
-  // ── Step 1: Log KillEvent JSON to stdout ──────────────────────────────────
+  // Helper: emit event via callback or fall back to console
+  const log = (event: string, data: Record<string, unknown>) => {
+    if (emit) {
+      try { emit(event, data); } catch { /* emit must not block teardown */ }
+    } else {
+      console.log(JSON.stringify({ event, ...data, timestamp: new Date().toISOString() }));
+    }
+  };
+  const logError = (event: string, data: Record<string, unknown>) => {
+    if (emit) {
+      try { emit(event, data); } catch { /* emit must not block teardown */ }
+    } else {
+      console.error(JSON.stringify({ event, ...data, timestamp: new Date().toISOString() }));
+    }
+  };
+
+  // ── Step 1: Log KillEvent ──────────────────────────────────────────────────
   const killEvent: KillEvent = {
     runId,
     killReason,
@@ -72,17 +90,13 @@ export async function teardown(
   };
 
   try {
-    console.log(JSON.stringify(killEvent));
+    log('kill', { runId, killReason, tokenCount, wallTimeMs });
   } catch (err) {
-    console.error(
-      JSON.stringify({
-        event: 'teardown_step_failed',
-        step: 'log_kill_event',
-        runId,
-        error: err instanceof Error ? err.message : String(err),
-        timestamp: new Date().toISOString(),
-      }),
-    );
+    logError('teardown_step_failed', {
+      step: 'log_kill_event',
+      runId,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   // ── Step 2: Flush artifacts from sandbox to host ───────────────────────────
@@ -91,45 +105,33 @@ export async function teardown(
   try {
     artifactManifest = await sandboxRunner.flushArtifacts(runId);
   } catch (err) {
-    console.error(
-      JSON.stringify({
-        event: 'teardown_step_failed',
-        step: 'flush_artifacts',
-        runId,
-        error: err instanceof Error ? err.message : String(err),
-        timestamp: new Date().toISOString(),
-      }),
-    );
+    logError('teardown_step_failed', {
+      step: 'flush_artifacts',
+      runId,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   // ── Step 3: Close Langfuse trace and flush ────────────────────────────────
   try {
     await tracer.close(killReason, tokenCount);
   } catch (err) {
-    console.error(
-      JSON.stringify({
-        event: 'teardown_step_failed',
-        step: 'tracer_close',
-        runId,
-        error: err instanceof Error ? err.message : String(err),
-        timestamp: new Date().toISOString(),
-      }),
-    );
+    logError('teardown_step_failed', {
+      step: 'tracer_close',
+      runId,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   // ── Step 4: Destroy E2B sandbox ───────────────────────────────────────────
   try {
     await sandboxRunner.destroy();
   } catch (err) {
-    console.error(
-      JSON.stringify({
-        event: 'teardown_step_failed',
-        step: 'sandbox_destroy',
-        runId,
-        error: err instanceof Error ? err.message : String(err),
-        timestamp: new Date().toISOString(),
-      }),
-    );
+    logError('teardown_step_failed', {
+      step: 'sandbox_destroy',
+      runId,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   // ── Step 5: Write RunResult JSON to ./runs/<runId>/result.json ────────────
@@ -159,15 +161,11 @@ export async function teardown(
     const resultPath = path.join(runDir, 'result.json');
     await fs.writeFile(resultPath, JSON.stringify(runResult, null, 2), 'utf-8');
   } catch (err) {
-    console.error(
-      JSON.stringify({
-        event: 'teardown_step_failed',
-        step: 'write_result_json',
-        runId,
-        error: err instanceof Error ? err.message : String(err),
-        timestamp: new Date().toISOString(),
-      }),
-    );
+    logError('teardown_step_failed', {
+      step: 'write_result_json',
+      runId,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
