@@ -20,9 +20,9 @@ PASS=0
 FAIL=0
 SKIP=0
 
-pass() { echo -e "  ${GREEN}✓${NC} $1"; ((PASS++)); }
-fail() { echo -e "  ${RED}✗${NC} $1"; ((FAIL++)); }
-skip() { echo -e "  ${YELLOW}⊘${NC} $1 (skipped)"; ((SKIP++)); }
+pass() { echo -e "  ${GREEN}✓${NC} $1"; ((PASS++)) || true; }
+fail() { echo -e "  ${RED}✗${NC} $1"; ((FAIL++)) || true; }
+skip() { echo -e "  ${YELLOW}⊘${NC} $1 (skipped)"; ((SKIP++)) || true; }
 
 # Check that result.json has the expected exitReason.type
 check_exit_reason() {
@@ -160,6 +160,7 @@ run_loop() {
   local exit_code=0
   node dist/cli/run.js \
     --task tasks/example-looping.json \
+    --agent looping \
     --variant integration-loop \
     --budget 50000 \
     --ttl 120 \
@@ -186,7 +187,7 @@ run_ttl() {
 
   local exit_code=0
   node dist/cli/run.js \
-    --task tasks/example-simple.json \
+    --task tasks/example-slow.json \
     --variant integration-ttl \
     --budget 50000 \
     --ttl 5 \

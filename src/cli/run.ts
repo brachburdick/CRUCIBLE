@@ -3,6 +3,7 @@
 import * as fs from 'node:fs/promises';
 import { Command } from 'commander';
 import type {
+  AgentFn,
   KillReason,
   LlmCallFn,
   LlmMessage,
@@ -25,8 +26,14 @@ const EXIT_BUDGET_EXCEEDED = 1;
 const EXIT_LOOP_DETECTED = 2;
 const EXIT_TTL_EXCEEDED = 3;
 
-// ─── Agent ──────────────────────────────────────────────────────────────────────
+// ─── Agents ─────────────────────────────────────────────────────────────────────
 import { createAgent } from '../agents/echo.js';
+import { createLoopingAgent } from '../agents/looping.js';
+
+const AGENTS: Record<string, (task: TaskPayload) => AgentFn> = {
+  echo: createAgent,
+  looping: createLoopingAgent,
+};
 
 // ─── Base LLM call via Anthropic Messages API ──────────────────────────────────
 const baseLlmCall: LlmCallFn = async (
@@ -146,6 +153,7 @@ async function main(): Promise<void> {
     .description('Run a sandboxed agent evaluation')
     .requiredOption('--task <file>', 'Path to task payload JSON file')
     .option('--variant <label>', 'Variant label for this run', 'default')
+    .option('--agent <name>', 'Agent to use (echo, looping)', 'echo')
     .option('--budget <tokens>', 'Token budget (overrides DEFAULT_TOKEN_BUDGET env)')
     .option('--ttl <seconds>', 'TTL in seconds (overrides DEFAULT_TTL_SECONDS env)')
     .parse(process.argv);
@@ -153,9 +161,16 @@ async function main(): Promise<void> {
   const opts = program.opts<{
     task: string;
     variant: string;
+    agent: string;
     budget?: string;
     ttl?: string;
   }>();
+
+  // ── Validate agent name ───────────────────────────────────────────────
+  const agentFactory = AGENTS[opts.agent];
+  if (!agentFactory) {
+    throw new Error(`Unknown agent: ${opts.agent}. Available: ${Object.keys(AGENTS).join(', ')}`);
+  }
 
   // ── Step 2: Read and validate task payload ────────────────────────────────
   const taskFileContent = await fs.readFile(opts.task, 'utf-8');
@@ -249,7 +264,7 @@ async function main(): Promise<void> {
   // ── Steps 14–18: Run agent and handle outcomes ────────────────────────────
   try {
     // Step 14: Call agent
-    const agentFn = createAgent(taskPayload);
+    const agentFn = agentFactory(taskPayload);
     const result = await agentFn(wrappedLlmCall, toolContext);
     console.log(JSON.stringify({ event: 'agent_completed', runId, finalMessage: result.finalMessage, timestamp: new Date().toISOString() }));
 

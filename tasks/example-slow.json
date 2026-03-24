@@ -1,0 +1,4 @@
+{
+  "description": "Slow task designed to exceed TTL",
+  "instructions": "You are writing a comprehensive technical reference document. For each section below, write 3-4 detailed paragraphs. Do not skip any section. Do not abbreviate.\n\n1. History of operating systems from 1960 to present\n2. Detailed comparison of memory management strategies\n3. File system architectures and their trade-offs\n4. Network protocol stack layer by layer\n5. Concurrency models in modern programming languages\n6. Database indexing strategies and B-tree variants\n7. Compiler optimization passes explained\n8. Distributed consensus algorithms\n\nUse WRITE_FILE:reference.txt:<content> to save each section as you go. Do not say TASK_COMPLETE until all 8 sections are written and saved."
+}

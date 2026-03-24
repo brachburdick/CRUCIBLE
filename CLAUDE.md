@@ -23,6 +23,13 @@ Key layers: CLI entrypoint -> middleware stack (token budget, loop detector, tra
 - Middleware is composed via `composeMiddleware()`, order matters.
 - Task payloads are JSON files in `tasks/`.
 
+## Trigger Table
+| Task Pattern | Skill | Notes |
+|---|---|---|
+| E2B sandbox / sandbox lifecycle / artifact flush | skills/e2b-sandbox.md | TTL, network policy, file upload |
+| Langfuse / tracing / observability / spans | skills/langfuse-tracing.md | SDK type gotchas, trace patterns |
+| TypeScript / ESM / NodeNext / module resolution | skills/typescript-node.md | Extensions, barrel files |
+
 ## Flow Skills
 Flow skills (spec/plan/implement/test/verify gates) are inherited from the portfolio level (`skills/`). No project-specific flow modifications needed for CRUCIBLE.
 

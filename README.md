@@ -4,6 +4,15 @@ Sandboxed agent evaluation harness for testing AI orchestration pipeline variant
 
 CRUCIBLE runs an agent inside an isolated [E2B](https://e2b.dev) sandbox, monitors it with configurable kill switches (token budget, semantic loop detection, wall-clock TTL), traces every call via [Langfuse](https://langfuse.com), and writes a structured JSON result when the run ends — cleanly or killed.
 
+## Related Docs
+
+- Benchmark program and variant matrix:
+  `docs/benchmark-program.md`
+- Canonical interface reference:
+  `docs/interfaces.md`
+- Shared research note on decomposition theory:
+  `../../support/research/problem-decomposition-landscape.md`
+
 ## Prerequisites
 
 - **Node.js** 18+
@@ -25,7 +34,7 @@ npm run build
 ## Usage
 
 ```bash
-npx crucible run --task <file> [--variant <label>] [--budget <tokens>] [--ttl <seconds>]
+npx crucible run --task <file> [--agent <name>] [--variant <label>] [--budget <tokens>] [--ttl <seconds>]
 ```
 
 ### Flags
@@ -33,6 +42,7 @@ npx crucible run --task <file> [--variant <label>] [--budget <tokens>] [--ttl <s
 | Flag | Required | Description | Default |
 |------|----------|-------------|---------|
 | `--task <file>` | Yes | Path to task payload JSON file | — |
+| `--agent <name>` | No | Agent to use (`echo`, `looping`) | `echo` |
 | `--variant <label>` | No | Label for this run variant | `default` |
 | `--budget <tokens>` | No | Token budget for the run | `DEFAULT_TOKEN_BUDGET` env or `100000` |
 | `--ttl <seconds>` | No | Wall-clock time limit in seconds | `DEFAULT_TTL_SECONDS` env or `300` |
@@ -76,7 +86,8 @@ Task files are JSON with this structure:
 | `OPENAI_API_KEY` | OpenAI API key for embeddings (loop detector) | — (required) |
 | `LANGFUSE_PUBLIC_KEY` | Langfuse public key | — (required) |
 | `LANGFUSE_SECRET_KEY` | Langfuse secret key | — (required) |
-| `LANGFUSE_HOST` | Langfuse host URL | `https://cloud.langfuse.com` |
+| `LANGFUSE_BASE_URL` | Langfuse host URL (preferred) | `https://cloud.langfuse.com` |
+| `LANGFUSE_HOST` | Langfuse host URL (fallback) | `https://cloud.langfuse.com` |
 | `DEFAULT_TOKEN_BUDGET` | Default token budget when `--budget` is not passed | `100000` |
 | `DEFAULT_TTL_SECONDS` | Default TTL when `--ttl` is not passed | `300` |
 | `LOOP_WINDOW_SIZE` | Number of recent messages to keep for similarity comparison | `8` |
@@ -98,10 +109,20 @@ CRUCIBLE is a library + CLI with four layers:
 
 ```
 CLI (src/cli/)
+ ├── Agents (src/agents/)         — pluggable agent implementations
  ├── Middleware (src/middleware/)  — token budget, loop detector
  ├── Sandbox (src/sandbox/)       — E2B lifecycle, ToolContext facade
  └── Telemetry (src/telemetry/)   — Langfuse tracing
 ```
+
+### Agents
+
+Agents are selected via `--agent` and implement the `AgentFn` type signature. Each is a factory that closes over a `TaskPayload`:
+
+| Agent | Description |
+|-------|-------------|
+| `echo` | General-purpose agent. Sends task instructions to the LLM, parses `WRITE_FILE` / `EXEC` actions, loops until `TASK_COMPLETE` or turn limit. |
+| `looping` | Test agent. Sends the same message every turn to reliably trigger loop detection. Used by integration tests. |
 
 **LLM calls are host-side.** The E2B sandbox is purely an execution environment for agent tool actions (file I/O, shell commands). All LLM calls, token counting, loop detection, and tracing happen in the host Node.js process. The sandbox outbound network is fully locked by default.
 
@@ -146,16 +167,35 @@ E2B's native TTL is set to `ttlSeconds + 30` as a hard backstop in case graceful
 ```
 crucible/
 ├── src/
-│   ├── cli/           # CLI entrypoint, run orchestration
-│   ├── middleware/     # Token budget, loop detector, stack composer
-│   ├── sandbox/        # E2B wrapper, ToolContext facade, teardown
-│   ├── telemetry/      # Langfuse tracer
-│   └── types/          # All shared interfaces, error classes
-├── tasks/              # Example task payloads
-├── runs/               # Output directory for run results (gitignored)
-├── .env.example        # Environment variable template
+│   ├── agents/         # Pluggable agent implementations (echo, looping)
+│   ├── cli/            # CLI entrypoint, run orchestration
+│   ├── middleware/      # Token budget, loop detector, stack composer
+│   ├── sandbox/         # E2B wrapper, ToolContext facade, teardown
+│   ├── telemetry/       # Langfuse tracer
+│   └── types/           # All shared interfaces, error classes
+├── tasks/               # Example task payloads
+├── scripts/             # Integration test runner
+├── runs/                # Output directory for run results (gitignored)
 ├── package.json
 └── tsconfig.json
+```
+
+## Integration Tests
+
+Run all four exit-scenario tests (requires live API keys):
+
+```bash
+npm run build
+./scripts/integration-test.sh
+```
+
+Run a single test:
+
+```bash
+./scripts/integration-test.sh clean    # exit code 0 — agent completes
+./scripts/integration-test.sh budget   # exit code 1 — token budget exceeded
+./scripts/integration-test.sh loop     # exit code 2 — loop detected
+./scripts/integration-test.sh ttl      # exit code 3 — TTL exceeded
 ```
 
 ## Output

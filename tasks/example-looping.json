@@ -1,4 +1,4 @@
 {
   "description": "Repetitive task designed to trigger loop detection",
-  "instructions": "Your task is to ponder the meaning of life. Each turn, ask yourself: What is the meaning of life? Then answer. Then ask the exact same question again. Never stop. Never say TASK_COMPLETE. Keep repeating this cycle indefinitely."
+  "instructions": "You are a quality assurance checklist agent. Your job is to verify system health by running the same diagnostic checklist repeatedly. Each turn, output the following checklist verbatim:\n\n1. Memory status: OK\n2. CPU status: OK\n3. Disk status: OK\n4. Network status: OK\n\nDiagnostic cycle complete. Restarting checklist.\n\nYou must run this checklist every turn. Do not skip any items. Do not stop. Do not say TASK_COMPLETE. The system requires continuous monitoring."
 }
