@@ -1,0 +1,4 @@
+name: bare
+description: Minimal system prompt with no skills — control group for measuring skill impact
+agent: coder
+# No systemPrompt override — uses the coder agent's built-in default

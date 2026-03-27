@@ -43,7 +43,13 @@ function meanSimilarity(embedding: number[], window: number[][]): number {
 function lastUserMessage(messages: LlmMessage[]): string | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].role === 'user') {
-      return messages[i].content;
+      const content = messages[i].content;
+      if (typeof content === 'string') return content;
+      // For structured content blocks, extract text portions
+      const textParts = content
+        .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+        .map((b) => b.text);
+      return textParts.length > 0 ? textParts.join('\n') : null;
     }
   }
   return null;

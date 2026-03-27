@@ -17,8 +17,12 @@ export interface TaskPayload {
   instructions: string;
   /** Optional initial files to upload to sandbox */
   files?: Record<string, string>;
+  /** Optional path to a directory to upload as the seed repo */
+  seedDir?: string;
   /** Optional network allowlist for sandbox (empty = fully locked) */
   networkAllowlist?: string[];
+  /** Acceptance checks to run after the agent completes */
+  checks?: CheckSpec[];
 }
 
 /** Discriminated union for why a run ended */
@@ -72,13 +76,22 @@ export type LlmCallFn = (
 
 export interface LlmMessage {
   role: 'system' | 'user' | 'assistant';
-  content: string;
+  /** String for text messages, or structured content blocks for tool results */
+  content: string | ContentBlock[];
 }
+
+/** Content block types used in the Anthropic Messages API */
+export type ContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
+  | { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean };
 
 export interface LlmCallOptions {
   model?: string;
   maxTokens?: number;
   temperature?: number;
+  /** Tool definitions for Claude's native tool_use API */
+  tools?: ToolDefinition[];
 }
 
 export interface LlmResponse {
@@ -88,6 +101,34 @@ export interface LlmResponse {
     completionTokens: number;
   };
   model: string;
+  /** Tool calls requested by the model (present when tools were provided) */
+  toolCalls?: ToolCall[];
+  /** Stop reason from the API ('end_turn', 'tool_use', 'max_tokens') */
+  stopReason?: string;
+}
+
+// ─── Tool-use types ───
+
+/** Tool definition passed to the Anthropic Messages API */
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+}
+
+/** A tool call requested by the model */
+export interface ToolCall {
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+}
+
+/** A tool result sent back to the model */
+export interface ToolResult {
+  type: 'tool_result';
+  tool_use_id: string;
+  content: string;
+  is_error?: boolean;
 }
 
 /** Tool context passed to agent — facade over E2B sandbox operations */
@@ -117,6 +158,58 @@ export interface AgentOutput {
 
 /** Middleware is a function that wraps an LlmCallFn */
 export type Middleware = (next: LlmCallFn) => LlmCallFn;
+
+// ─── Variant config ───
+
+/** Configuration for a pipeline variant — defines how the agent behaves */
+export interface VariantConfig {
+  /** Unique variant name (used as variantLabel in RunResult) */
+  name: string;
+  /** Human-readable description of this variant */
+  description: string;
+  /** Agent to use from the AGENTS registry (default: 'coder') */
+  agent?: string;
+  /** Model override (e.g., 'claude-opus-4-20250514') */
+  model?: string;
+  /** System prompt — inline text or path to a .md file */
+  systemPrompt?: string;
+  /** Paths to skill .md files to append to the system prompt */
+  skills?: string[];
+  /** Token budget override */
+  budget?: number;
+  /** TTL override in seconds */
+  ttl?: number;
+  /** Freeform metadata for tracking experiment dimensions */
+  metadata?: Record<string, unknown>;
+}
+
+// ─── Scoring types ───
+
+/** Specification for a single acceptance check */
+export interface CheckSpec {
+  /** Human-readable check name */
+  name: string;
+  /** Check type — currently only 'exec' (run a command) */
+  type: 'exec';
+  /** Shell command to execute in the sandbox */
+  command: string;
+  /** Expected exit code (default: 0) */
+  expectedExitCode?: number;
+  /** Timeout in seconds for the check command */
+  timeout?: number;
+}
+
+/** Result of running acceptance checks after a run */
+export interface ScoreResult {
+  checks: Array<{
+    name: string;
+    passed: boolean;
+    stdout?: string;
+    stderr?: string;
+    exitCode?: number;
+  }>;
+  passRate: number;
+}
 
 // ─── Error types ───
 

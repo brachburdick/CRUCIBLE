@@ -1,4 +1,4 @@
-import type { TaskPayload } from '../types/index.js';
+import type { TaskPayload, CheckSpec } from '../types/index.js';
 
 /**
  * Validate and parse a raw JSON object into a TaskPayload.
@@ -30,6 +30,13 @@ export function validateTaskPayload(raw: unknown): TaskPayload {
     payload.files = obj['files'] as Record<string, string>;
   }
 
+  if (obj['seedDir'] !== undefined) {
+    if (typeof obj['seedDir'] !== 'string') {
+      throw new Error('Task payload "seedDir" must be a string path');
+    }
+    payload.seedDir = obj['seedDir'];
+  }
+
   if (obj['networkAllowlist'] !== undefined) {
     if (!Array.isArray(obj['networkAllowlist'])) {
       throw new Error('Task payload "networkAllowlist" must be an array');
@@ -37,5 +44,31 @@ export function validateTaskPayload(raw: unknown): TaskPayload {
     payload.networkAllowlist = obj['networkAllowlist'] as string[];
   }
 
+  if (obj['checks'] !== undefined) {
+    if (!Array.isArray(obj['checks'])) {
+      throw new Error('Task payload "checks" must be an array');
+    }
+    payload.checks = (obj['checks'] as Record<string, unknown>[]).map(validateCheckSpec);
+  }
+
   return payload;
+}
+
+function validateCheckSpec(raw: Record<string, unknown>): CheckSpec {
+  if (typeof raw['name'] !== 'string' || !raw['name']) {
+    throw new Error('Check spec must have a non-empty "name" string');
+  }
+  if (raw['type'] !== 'exec') {
+    throw new Error(`Check spec type must be "exec", got "${String(raw['type'])}"`);
+  }
+  if (typeof raw['command'] !== 'string' || !raw['command']) {
+    throw new Error('Check spec must have a non-empty "command" string');
+  }
+  return {
+    name: raw['name'],
+    type: 'exec',
+    command: raw['command'],
+    expectedExitCode: typeof raw['expectedExitCode'] === 'number' ? raw['expectedExitCode'] : undefined,
+    timeout: typeof raw['timeout'] === 'number' ? raw['timeout'] : undefined,
+  };
 }

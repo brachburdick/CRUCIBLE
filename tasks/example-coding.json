@@ -1,0 +1,25 @@
+{
+  "description": "Fix a Python function that returns the wrong value",
+  "instructions": "There is a file called `calculator.py` that contains a function `calculate_average(numbers)`. The function has a bug — it divides by len(numbers) + 1 instead of len(numbers). Fix the bug so the function returns the correct average.\n\nThere is also a test file `test_calculator.py`. After fixing the bug, run the tests with `python -m pytest test_calculator.py -v` to verify your fix.\n\nMake sure all tests pass before completing the task.",
+  "files": {
+    "calculator.py": "def calculate_average(numbers):\n    \"\"\"Calculate the average of a list of numbers.\"\"\"\n    if not numbers:\n        return 0\n    total = sum(numbers)\n    return total / (len(numbers) + 1)  # BUG: should be len(numbers)\n\n\ndef calculate_sum(numbers):\n    \"\"\"Calculate the sum of a list of numbers.\"\"\"\n    return sum(numbers)\n",
+    "test_calculator.py": "from calculator import calculate_average, calculate_sum\n\n\ndef test_average_basic():\n    assert calculate_average([1, 2, 3]) == 2.0\n\n\ndef test_average_single():\n    assert calculate_average([5]) == 5.0\n\n\ndef test_average_empty():\n    assert calculate_average([]) == 0\n\n\ndef test_average_negative():\n    assert calculate_average([-1, 1]) == 0.0\n\n\ndef test_sum_basic():\n    assert calculate_sum([1, 2, 3]) == 6\n"
+  },
+  "checks": [
+    {
+      "name": "visible: all tests pass",
+      "type": "exec",
+      "command": "cd /home/user && python -c \"from calculator import calculate_average; assert calculate_average([1,2,3]) == 2.0; assert calculate_average([5]) == 5.0; assert calculate_average([]) == 0; assert calculate_average([-1,1]) == 0.0; print('all tests pass')\""
+    },
+    {
+      "name": "hidden: calculate_sum unchanged",
+      "type": "exec",
+      "command": "cd /home/user && python -c \"from calculator import calculate_sum; assert calculate_sum([1,2,3]) == 6\""
+    },
+    {
+      "name": "hidden: no extra imports added",
+      "type": "exec",
+      "command": "cd /home/user && ! grep -q '^import\\|^from' calculator.py"
+    }
+  ]
+}

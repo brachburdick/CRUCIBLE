@@ -15,6 +15,8 @@ import { composeMiddleware } from '../middleware/stack.js';
 import { RunTracer } from '../telemetry/tracer.js';
 import { baseLlmCall } from './llm.js';
 import { AGENTS } from './agents.js';
+import { runChecks } from './scorer.js';
+import type { ScoreResult } from '../types/index.js';
 
 export interface RunEvent {
   runId: string;
@@ -63,8 +65,10 @@ export class RunEngine extends EventEmitter {
    * Start a run. Returns the RunResult when the run completes (cleanly or killed).
    * Emits events throughout the run lifecycle.
    * Never throws — errors are captured and returned as part of the result.
+   *
+   * @param agentConfig Optional config passed to the agent factory (e.g., CoderAgentConfig)
    */
-  async startRun(config: RunConfig, agentName: string): Promise<RunResult> {
+  async startRun(config: RunConfig, agentName: string, agentConfig?: Record<string, unknown>): Promise<RunResult> {
     // Validate agent
     const agentFactory = AGENTS[agentName];
     if (!agentFactory) {
@@ -150,11 +154,12 @@ export class RunEngine extends EventEmitter {
 
     // Run agent
     let killReason: KillReason;
+    let scoreResult: ScoreResult | undefined;
 
     try {
       const agentResult = await Promise.race([
         (async () => {
-          const agentFn = agentFactory(config.taskPayload);
+          const agentFn = agentFactory(config.taskPayload, agentConfig);
           return agentFn(wrappedLlmCall, toolContext);
         })(),
         ttlPromise.then(() => null), // TTL fires → returns null
@@ -168,6 +173,22 @@ export class RunEngine extends EventEmitter {
         this.emitRunEvent(runId, 'agent_completed', { finalMessage: agentResult.finalMessage });
         killReason = { type: 'completed' };
         if (ttlTimer) clearTimeout(ttlTimer);
+
+        // Run acceptance checks before teardown (sandbox still alive)
+        if (config.taskPayload.checks && config.taskPayload.checks.length > 0) {
+          try {
+            scoreResult = await runChecks(config.taskPayload.checks, toolContext);
+            this.emitRunEvent(runId, 'checks_completed', {
+              passRate: scoreResult.passRate,
+              checks: scoreResult.checks.map((c) => ({ name: c.name, passed: c.passed })),
+            });
+          } catch (err) {
+            this.emitRunEvent(runId, 'checks_error', {
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+
         await safeTeardown(killReason);
       }
     } catch (err) {
@@ -212,12 +233,14 @@ export class RunEngine extends EventEmitter {
       startedAt: startedAt.toISOString(),
       completedAt: completedAt.toISOString(),
       artifacts: { outputDir: `runs/${runId}/artifacts`, files: [] },
+      metadata: scoreResult ? { scores: scoreResult } : undefined,
     };
 
     this.emitRunEvent(runId, 'run_completed', {
       exitReason: killReason,
       tokenCount: getTokenCount(),
       wallTimeMs: result.wallTimeMs,
+      scores: scoreResult ? { passRate: scoreResult.passRate } : undefined,
     });
 
     return result;
