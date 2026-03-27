@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 
 import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import { Command } from 'commander';
 import type { RunConfig } from '../types/index.js';
 import { RunEngine } from '../engine/RunEngine.js';
+import { SessionModel } from '../session/index.js';
 import { validateTaskPayload } from '../engine/validation.js';
 import { getAgentNames } from '../engine/agents.js';
 import { loadVariant } from '../engine/variants.js';
@@ -22,6 +24,8 @@ async function main(): Promise<void> {
     .option('--agent <name>', `Agent to use (${getAgentNames().join(', ')})`, 'echo')
     .option('--budget <tokens>', 'Token budget (overrides DEFAULT_TOKEN_BUDGET env)')
     .option('--ttl <seconds>', 'TTL in seconds (overrides DEFAULT_TTL_SECONDS env)')
+    .option('--agent-dir <path>', 'Path to .agent/ directory for session state', '.agent')
+    .option('--no-session', 'Disable session model (no state persistence, run records, mutation guard)')
     .parse(process.argv);
 
   const opts = program.opts<{
@@ -31,6 +35,8 @@ async function main(): Promise<void> {
     agent: string;
     budget?: string;
     ttl?: string;
+    agentDir: string;
+    session: boolean;
   }>();
 
   // Read and validate task payload
@@ -72,8 +78,28 @@ async function main(): Promise<void> {
       }
     : undefined;
 
-  // Create engine and subscribe to events (log to stdout as JSON)
+  // Initialize session model (unless --no-session)
+  let session: SessionModel | null = null;
+  if (opts.session) {
+    const agentDir = path.resolve(opts.agentDir);
+    session = new SessionModel({ agentDir });
+    await session.initialize();
+
+    // Load prior session knowledge (decisions, dead ends, key locations)
+    const snapshot = session.snapshot.current;
+    if (snapshot.sessionKnowledge.decisions.length > 0) {
+      console.error(
+        `[crucible] Loaded ${snapshot.sessionKnowledge.decisions.length} prior decisions, ` +
+        `${snapshot.sessionKnowledge.deadEnds.length} dead ends from previous session.`
+      );
+    }
+  }
+
+  // Create engine and attach session
   const engine = new RunEngine();
+  if (session) {
+    engine.setSession(session);
+  }
 
   engine.on('run:event', (event) => {
     console.log(JSON.stringify(event));
@@ -81,6 +107,14 @@ async function main(): Promise<void> {
 
   // Run and translate result to exit code
   const result = await engine.startRun(runConfig, agentName, agentConfig);
+
+  // Finalize session — persist state snapshot + task queue
+  if (session) {
+    session.snapshot.setActiveTasks([]);
+    await session.finalize();
+    console.error(`[crucible] Session finalized. Run record written.`);
+  }
+
   process.exit(exitCodeFromReason(result.exitReason.type));
 }
 

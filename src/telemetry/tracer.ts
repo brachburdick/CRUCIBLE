@@ -1,4 +1,8 @@
-import { Langfuse, LangfuseTraceClient } from 'langfuse';
+import { trace, context, SpanStatusCode } from '@opentelemetry/api';
+import type { Tracer, Span } from '@opentelemetry/api';
+import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
+import { SimpleSpanProcessor, InMemorySpanExporter } from '@opentelemetry/sdk-trace-node';
+import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import type {
   RunConfig,
   KillReason,
@@ -8,6 +12,7 @@ import type {
   LlmCallOptions,
   LlmResponse,
 } from '../types/index.js';
+import { GENAI, CRUCIBLE } from './otel-attributes.js';
 
 /** Middleware event passed to traceMiddlewareEvent */
 export interface MiddlewareEvent {
@@ -16,56 +21,106 @@ export interface MiddlewareEvent {
 }
 
 /**
- * RunTracer manages a single Langfuse root trace per run.
+ * Options for creating a RunTracer. Allows injecting a custom provider
+ * for testing (in-memory exporter) without network calls.
+ */
+export interface RunTracerOptions {
+  /** Custom TracerProvider — if omitted, creates one with OTLP exporter. */
+  provider?: NodeTracerProvider;
+}
+
+/**
+ * RunTracer manages a single OTel root span per run.
  * Agent code never receives a reference to this class — append-only by construction.
+ *
+ * Replaces the previous Langfuse-based implementation. Public API is identical.
+ * Traces are exported via OTLP to any compatible backend (Langfuse v3, Jaeger,
+ * Datadog, Grafana Tempo) configured via OTEL_EXPORTER_OTLP_ENDPOINT.
  */
 export class RunTracer {
-  private readonly langfuse: Langfuse;
-  private readonly trace: LangfuseTraceClient;
+  private readonly provider: NodeTracerProvider;
+  private readonly tracer: Tracer;
+  private readonly rootSpan: Span;
   private readonly runId: string;
   private readonly startTime: Date;
+  private readonly ownsProvider: boolean;
 
   private constructor(
-    langfuse: Langfuse,
-    trace: LangfuseTraceClient,
+    provider: NodeTracerProvider,
+    tracer: Tracer,
+    rootSpan: Span,
     runId: string,
     startTime: Date,
+    ownsProvider: boolean,
   ) {
-    this.langfuse = langfuse;
-    this.trace = trace;
+    this.provider = provider;
+    this.tracer = tracer;
+    this.rootSpan = rootSpan;
     this.runId = runId;
     this.startTime = startTime;
+    this.ownsProvider = ownsProvider;
   }
 
   /**
-   * Create a RunTracer with a root Langfuse trace for the given run.
-   * Auth is pulled from LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST env vars.
+   * Create a RunTracer with a root OTel span for the given run.
+   *
+   * Env vars:
+   *   OTEL_EXPORTER_OTLP_ENDPOINT — OTLP endpoint (default: http://localhost:4318)
+   *   OTEL_EXPORTER_OTLP_HEADERS  — Additional headers (e.g., auth for Langfuse)
+   *   OTEL_SERVICE_NAME            — Service name (default: crucible)
    */
-  static create(runConfig: RunConfig): RunTracer {
+  static create(runConfig: RunConfig, options?: RunTracerOptions): RunTracer {
     const startTime = new Date();
-
-    const langfuse = new Langfuse({
-      publicKey: process.env['LANGFUSE_PUBLIC_KEY'],
-      secretKey: process.env['LANGFUSE_SECRET_KEY'],
-      baseUrl: process.env['LANGFUSE_BASE_URL'] ?? process.env['LANGFUSE_HOST'],
-    });
-
     const runId = crypto.randomUUID();
 
-    const trace = langfuse.trace({
-      id: runId,
-      name: `crucible-run-${runConfig.variantLabel}`,
-      timestamp: startTime,
-      metadata: {
-        variantLabel: runConfig.variantLabel,
-        tokenBudget: runConfig.tokenBudget,
-        ttlSeconds: runConfig.ttlSeconds,
-        taskDescription: runConfig.taskPayload.description,
+    let provider: NodeTracerProvider;
+    let ownsProvider: boolean;
+
+    if (options?.provider) {
+      provider = options.provider;
+      ownsProvider = false;
+    } else {
+      const endpoint = process.env['OTEL_EXPORTER_OTLP_ENDPOINT'] ?? 'http://localhost:4318';
+
+      // Parse headers from env (format: "key=value,key2=value2")
+      const headersEnv = process.env['OTEL_EXPORTER_OTLP_HEADERS'] ?? '';
+      const headers: Record<string, string> = {};
+      if (headersEnv) {
+        for (const pair of headersEnv.split(',')) {
+          const eqIdx = pair.indexOf('=');
+          if (eqIdx > 0) {
+            headers[pair.slice(0, eqIdx).trim()] = pair.slice(eqIdx + 1).trim();
+          }
+        }
+      }
+
+      const exporter = new OTLPTraceExporter({
+        url: `${endpoint}/v1/traces`,
+        headers,
+      });
+
+      provider = new NodeTracerProvider({
+        spanProcessors: [new SimpleSpanProcessor(exporter)],
+      });
+      ownsProvider = true;
+    }
+
+    const serviceName = process.env['OTEL_SERVICE_NAME'] ?? 'crucible';
+    const tracer = provider.getTracer(serviceName, '0.1.0');
+
+    const rootSpan = tracer.startSpan('crucible-run', {
+      attributes: {
+        [GENAI.OPERATION_NAME]: 'invoke_agent',
+        [GENAI.AGENT_NAME]: runConfig.variantLabel,
+        [CRUCIBLE.RUN_ID]: runId,
+        [CRUCIBLE.VARIANT_LABEL]: runConfig.variantLabel,
+        [CRUCIBLE.TOKEN_BUDGET]: runConfig.tokenBudget,
+        [CRUCIBLE.TTL_SECONDS]: runConfig.ttlSeconds,
+        [CRUCIBLE.TASK_DESCRIPTION]: runConfig.taskPayload.description,
       },
-      tags: ['crucible', runConfig.variantLabel],
     });
 
-    return new RunTracer(langfuse, trace, runId, startTime);
+    return new RunTracer(provider, tracer, rootSpan, runId, startTime, ownsProvider);
   }
 
   /** The run ID associated with this trace (generated at create time). */
@@ -74,9 +129,8 @@ export class RunTracer {
   }
 
   /**
-   * Returns a Middleware that wraps LlmCallFn with a child generation span
+   * Returns a Middleware that wraps LlmCallFn with a child span
    * recording tokens in/out, model, and latency.
-   * The returned middleware conforms to: (next: LlmCallFn) => LlmCallFn
    */
   createTracerMiddleware(): Middleware {
     return (next: LlmCallFn): LlmCallFn => {
@@ -84,39 +138,37 @@ export class RunTracer {
         messages: LlmMessage[],
         options?: LlmCallOptions,
       ): Promise<LlmResponse> => {
-        const spanStart = new Date();
+        const parentCtx = trace.setSpan(context.active(), this.rootSpan);
 
-        const generation = this.trace.generation({
-          name: 'llm-call',
-          startTime: spanStart,
-          model: options?.model ?? 'unknown',
-          input: messages,
-          metadata: {
-            maxTokens: options?.maxTokens,
-            temperature: options?.temperature,
-          },
+        return context.with(parentCtx, async () => {
+          const span = this.tracer.startSpan('llm-call', {
+            attributes: {
+              [GENAI.OPERATION_NAME]: 'chat',
+              [GENAI.REQUEST_MODEL]: options?.model ?? 'unknown',
+            },
+          }, parentCtx);
+
+          try {
+            const response = await next(messages, options);
+
+            span.setAttributes({
+              [GENAI.USAGE_INPUT_TOKENS]: response.usage.promptTokens,
+              [GENAI.USAGE_OUTPUT_TOKENS]: response.usage.completionTokens,
+              [GENAI.REQUEST_MODEL]: response.model,
+            });
+            span.setStatus({ code: SpanStatusCode.OK });
+
+            return response;
+          } catch (err) {
+            span.setStatus({
+              code: SpanStatusCode.ERROR,
+              message: err instanceof Error ? err.message : String(err),
+            });
+            throw err;
+          } finally {
+            span.end();
+          }
         });
-
-        const response = await next(messages, options);
-
-        const spanEnd = new Date();
-        const latencyMs = spanEnd.getTime() - spanStart.getTime();
-
-        generation.end({
-          output: response.content,
-          model: response.model,
-          usage: {
-            promptTokens: response.usage.promptTokens,
-            completionTokens: response.usage.completionTokens,
-            totalTokens:
-              response.usage.promptTokens + response.usage.completionTokens,
-          },
-          metadata: {
-            latencyMs,
-          },
-        });
-
-        return response;
       };
     };
   }
@@ -130,71 +182,81 @@ export class RunTracer {
     output: unknown,
     durationMs: number,
   ): Promise<void> {
-    const now = new Date();
-    const startTime = new Date(now.getTime() - durationMs);
+    const parentCtx = trace.setSpan(context.active(), this.rootSpan);
+    const span = this.tracer.startSpan(`tool-call:${name}`, {
+      attributes: {
+        [GENAI.OPERATION_NAME]: 'execute_tool',
+        [GENAI.TOOL_NAME]: name,
+      },
+      startTime: new Date(Date.now() - durationMs),
+    }, parentCtx);
 
-    const span = this.trace.span({
-      name: `tool-call:${name}`,
-      startTime,
-      input,
-      metadata: { durationMs },
-    });
-
-    span.end({
-      output,
-    });
+    span.setAttribute('crucible.tool.input', JSON.stringify(input));
+    span.setAttribute('crucible.tool.output', JSON.stringify(output));
+    span.setStatus({ code: SpanStatusCode.OK });
+    span.end();
   }
 
   /**
    * Record a middleware event (budget warnings, loop flags) as a child span.
    */
   async traceMiddlewareEvent(event: MiddlewareEvent): Promise<void> {
-    const now = new Date();
+    const parentCtx = trace.setSpan(context.active(), this.rootSpan);
+    const span = this.tracer.startSpan(`middleware-event:${event.type}`, {
+      attributes: {
+        'crucible.event.type': event.type,
+      },
+    }, parentCtx);
 
-    const span = this.trace.span({
-      name: `middleware-event:${event.type}`,
-      startTime: now,
-      input: event.details ?? {},
-      metadata: { eventType: event.type },
-    });
+    if (event.details) {
+      for (const [key, value] of Object.entries(event.details)) {
+        if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+          span.setAttribute(`crucible.event.${key}`, value);
+        }
+      }
+    }
 
     span.end();
   }
 
   /**
-   * Close the root trace with the kill reason and final token count,
-   * then flush all pending events to Langfuse.
-   * If flush fails, the error is logged but not thrown — teardown must not be blocked.
+   * Close the root span with the kill reason and final token count,
+   * then shut down the provider to flush all pending spans.
+   * If shutdown fails, the error is logged but not thrown — teardown must not be blocked.
    */
   async close(killReason: KillReason, tokenCount: number): Promise<void> {
-    const endTime = new Date();
-    const wallTimeMs = endTime.getTime() - this.startTime.getTime();
+    const wallTimeMs = Date.now() - this.startTime.getTime();
 
-    this.trace.update({
-      output: {
-        killReason,
-        tokenCount,
-        wallTimeMs,
-      },
-      metadata: {
-        killReasonType: killReason.type,
-        tokenCount,
-        wallTimeMs,
-        completedAt: endTime.toISOString(),
-      },
+    this.rootSpan.setAttributes({
+      [CRUCIBLE.KILL_REASON_TYPE]: killReason.type,
+      'crucible.token.count': tokenCount,
+      'crucible.wall_time_ms': wallTimeMs,
     });
 
-    try {
-      await this.langfuse.flushAsync();
-    } catch (err) {
-      console.error(
-        JSON.stringify({
-          event: 'langfuse_flush_failed',
-          runId: this.runId,
-          error: err instanceof Error ? err.message : String(err),
-          timestamp: new Date().toISOString(),
-        }),
-      );
+    if (killReason.type === 'completed') {
+      this.rootSpan.setStatus({ code: SpanStatusCode.OK });
+    } else {
+      this.rootSpan.setStatus({
+        code: SpanStatusCode.ERROR,
+        message: killReason.type,
+      });
+    }
+
+    this.rootSpan.end();
+
+    if (this.ownsProvider) {
+      try {
+        await this.provider.shutdown();
+      } catch (err) {
+        console.error(
+          JSON.stringify({
+            event: 'otel_shutdown_failed',
+            runId: this.runId,
+            error: err instanceof Error ? err.message : String(err),
+            timestamp: new Date().toISOString(),
+          }),
+        );
+      }
     }
   }
 }

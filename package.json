@@ -5,26 +5,33 @@
   "type": "module",
   "bin": {
     "crucible": "./dist/cli/run.js",
-    "crucible-compare": "./dist/cli/compare.js"
+    "crucible-compare": "./dist/cli/compare.js",
+    "crucible-mcp": "./dist/cli/serve-mcp.js"
   },
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "serve": "node dist/server/serve.js",
     "compare": "node dist/cli/compare.js",
-    "test": "node --test dist/test/phase0.test.js dist/test/phase1.test.js dist/test/phase2.test.js dist/test/session.test.js dist/test/phase3.test.js",
+    "test": "node --test dist/test/phase0.test.js dist/test/phase1.test.js dist/test/phase2.test.js dist/test/session.test.js dist/test/phase3.test.js dist/test/phase5.test.js",
     "test:integration": "./scripts/integration-test.sh"
   },
   "dependencies": {
     "@fastify/static": "^9.0.0",
     "@fastify/websocket": "^11.2.0",
+    "@modelcontextprotocol/sdk": "^1.28.0",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/exporter-prometheus": "^0.57.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.57.0",
+    "@opentelemetry/sdk-metrics": "~1.30.1",
+    "@opentelemetry/sdk-trace-node": "~1.30.1",
     "better-sqlite3": "^12.8.0",
     "commander": "^13.1.0",
     "e2b": "^1.2.0",
     "fastify": "^5.8.4",
-    "langfuse": "^3.38.0",
     "openai": "^4.85.0",
-    "yaml": "^2.8.3"
+    "yaml": "^2.8.3",
+    "zod": "^3.23.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

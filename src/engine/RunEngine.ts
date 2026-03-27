@@ -11,12 +11,18 @@ import { SandboxRunner } from '../sandbox/runner.js';
 import { createIdempotentTeardown, type TeardownContext } from '../sandbox/teardown.js';
 import { createTokenBudget } from '../middleware/tokenBudget.js';
 import { createLoopDetector } from '../middleware/loopDetector.js';
+import { createMutationGuard } from '../middleware/mutationGuard.js';
 import { composeMiddleware } from '../middleware/stack.js';
 import { RunTracer } from '../telemetry/tracer.js';
 import { baseLlmCall } from './llm.js';
 import { AGENTS } from './agents.js';
 import { runChecks } from './scorer.js';
+import { detectFlowType } from './GraphExecutor.js';
+import { getFlowTemplate } from '../session/flow-templates.js';
+import { createRunRecord } from '../session/run-record.js';
+import type { SessionModel } from '../session/index.js';
 import type { ScoreResult } from '../types/index.js';
+import type { FlowTemplate } from '../session/types.js';
 
 export interface RunEvent {
   runId: string;
@@ -39,6 +45,18 @@ export interface RunEvent {
  */
 export class RunEngine extends EventEmitter {
   private activeRuns = new Map<string, { config: RunConfig; agentName: string; startedAt: Date }>();
+  private session: SessionModel | null = null;
+
+  /**
+   * Attach a SessionModel for session-aware runs.
+   * When set, runs will:
+   * - Enforce mutation budgets via MutationGuard
+   * - Inject flow templates into the agent system prompt
+   * - Write run records to .agent/runs.jsonl
+   */
+  setSession(session: SessionModel): void {
+    this.session = session;
+  }
 
   /** Emit a structured run event. */
   private emitRunEvent(runId: string, event: string, data: Record<string, unknown>): void {
@@ -119,8 +137,14 @@ export class RunEngine extends EventEmitter {
     // Compose middleware stack
     const wrappedLlmCall = composeMiddleware(baseLlmCall, tracerMW, tokenBudgetMW, loopDetectorMW);
 
-    // Build tool context
-    const toolContext = sandboxRunner.getToolContext();
+    // Build tool context — wrap with mutation guard if session is active
+    const rawToolContext = sandboxRunner.getToolContext();
+    let toolContext = rawToolContext;
+
+    if (this.session) {
+      this.session.mutations.resetNode();
+      toolContext = createMutationGuard(this.session.mutations, rawToolContext);
+    }
 
     // Build teardown context with emit callback
     const teardownContext: TeardownContext = {
@@ -152,6 +176,23 @@ export class RunEngine extends EventEmitter {
       ttlTimer.unref();
     });
 
+    // Detect flow type and inject flow template into agent config
+    let effectiveAgentConfig = agentConfig;
+    if (this.session) {
+      const flowType = detectFlowType(config.taskPayload.description);
+      const flow = getFlowTemplate(flowType);
+      const flowPromptSection = this.buildFlowPromptSection(flow);
+
+      // Prepend flow instructions to the system prompt
+      const existingPrompt = agentConfig?.systemPrompt as string | undefined ?? '';
+      effectiveAgentConfig = {
+        ...agentConfig,
+        systemPrompt: flowPromptSection + (existingPrompt ? '\n\n' + existingPrompt : ''),
+      };
+
+      this.emitRunEvent(runId, 'flow_detected', { flowType, phases: flow.phases.map(p => p.name) });
+    }
+
     // Run agent
     let killReason: KillReason;
     let scoreResult: ScoreResult | undefined;
@@ -159,7 +200,7 @@ export class RunEngine extends EventEmitter {
     try {
       const agentResult = await Promise.race([
         (async () => {
-          const agentFn = agentFactory(config.taskPayload, agentConfig);
+          const agentFn = agentFactory(config.taskPayload, effectiveAgentConfig);
           return agentFn(wrappedLlmCall, toolContext);
         })(),
         ttlPromise.then(() => null), // TTL fires → returns null
@@ -243,6 +284,59 @@ export class RunEngine extends EventEmitter {
       scores: scoreResult ? { passRate: scoreResult.passRate } : undefined,
     });
 
+    // Write run record to .agent/runs.jsonl if session is active
+    if (this.session) {
+      const runResult = killReason.type === 'completed'
+        ? (scoreResult && scoreResult.passRate < 1.0 ? 'partial' : 'success')
+        : 'failed';
+
+      const record = createRunRecord({
+        projectId: 'crucible',
+        taskId: config.variantLabel,
+        taskType: 'feature',
+        result: runResult as 'success' | 'partial' | 'failed',
+        summary: `Run ${runId}: ${killReason.type}, ${getTokenCount()} tokens, ${result.wallTimeMs}ms`,
+        filesTouched: this.session.mutations.getState().uniqueFiles,
+      });
+
+      try {
+        await this.session.runRecords.append(record);
+        this.emitRunEvent(runId, 'run_record_written', { recordId: record.runId });
+      } catch (err) {
+        this.emitRunEvent(runId, 'run_record_error', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
     return result;
+  }
+
+  /** Build a system prompt section from a flow template. */
+  private buildFlowPromptSection(flow: FlowTemplate): string {
+    const phases = flow.phases
+      .map((p, i) => `${i + 1}. **${p.name}**: ${p.description}`)
+      .join('\n');
+
+    const rules = flow.rules
+      .filter(r => r.enforcement === 'hard')
+      .map(r => `- ${r.description}`)
+      .join('\n');
+
+    return [
+      `## Flow: ${flow.type}`,
+      `${flow.description}`,
+      '',
+      '### Phases (follow in order):',
+      phases,
+      '',
+      '### Hard Rules:',
+      rules,
+      '',
+      '### Constraints:',
+      '- 2 consecutive file mutations without running tests = blocked',
+      '- After 2 failed attempts at the same fix, escalate',
+      '- If context feels degraded (turn > 40), wrap up with partial result',
+    ].join('\n');
   }
 }

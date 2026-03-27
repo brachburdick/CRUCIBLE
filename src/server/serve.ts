@@ -2,6 +2,7 @@
 
 import { Command } from 'commander';
 import { RunEngine } from '../engine/RunEngine.js';
+import { SessionModel } from '../session/index.js';
 import { openDatabase } from './db.js';
 import { createServer } from './index.js';
 
@@ -12,19 +13,28 @@ async function main(): Promise<void> {
     .name('crucible-serve')
     .description('Start the CRUCIBLE web UI server')
     .option('--port <number>', 'Port to listen on', '3100')
+    .option('--agent-dir <path>', 'Path to .agent/ directory for session state', '.agent')
     .parse(process.argv);
 
-  const opts = program.opts<{ port: string }>();
+  const opts = program.opts<{ port: string; agentDir: string }>();
   const port = Number(opts.port);
 
   const engine = new RunEngine();
   const db = openDatabase();
 
-  const server = await createServer({ port, engine, db });
+  // Initialize session model for API routes
+  const session = new SessionModel({ agentDir: opts.agentDir });
+  await session.initialize();
+
+  // Attach session to engine for session-aware runs launched from UI
+  engine.setSession(session);
+
+  const server = await createServer({ port, engine, db, session });
   const address = server.addresses()[0];
 
   console.log(`CRUCIBLE server running at http://localhost:${address?.port ?? port}`);
   console.log(`  API:       http://localhost:${address?.port ?? port}/api/runs`);
+  console.log(`  Session:   http://localhost:${address?.port ?? port}/api/session/snapshot`);
   console.log(`  WebSocket: ws://localhost:${address?.port ?? port}/api/ws`);
 }
 

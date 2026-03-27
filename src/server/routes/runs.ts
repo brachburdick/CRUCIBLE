@@ -59,24 +59,54 @@ export function registerRunRoutes(app: FastifyInstance, engine: RunEngine, db: D
   // ── Start a new run ───────────────────────────────────────────────────
   app.post<{
     Body: {
-      taskFile: string;
+      taskFile?: string;
       agent?: string;
       variant?: string;
       budget?: number;
       ttl?: number;
+      // Project-based launch: provide these instead of taskFile
+      projectName?: string;
+      description?: string;
+      instructions?: string;
+      seedDir?: string;
+      systemPrompt?: string;
     };
   }>('/api/runs', async (request, reply) => {
-    const { taskFile, agent = 'echo', variant = 'default', budget, ttl } = request.body;
+    const {
+      taskFile, agent = 'coder', variant = 'default', budget, ttl,
+      projectName, description, instructions, seedDir, systemPrompt,
+    } = request.body;
 
-    // Read and validate task payload
+    // Read and validate task payload — either from file or inline project task
     let taskPayload;
-    try {
-      const content = await fs.readFile(taskFile, 'utf-8');
-      taskPayload = validateTaskPayload(JSON.parse(content));
-    } catch (err) {
-      return reply.code(400).send({
-        error: `Failed to read task file: ${err instanceof Error ? err.message : String(err)}`,
+    let agentConfig: Record<string, unknown> | undefined;
+
+    if (taskFile) {
+      // File-based task (existing behavior)
+      try {
+        const content = await fs.readFile(taskFile, 'utf-8');
+        taskPayload = validateTaskPayload(JSON.parse(content));
+      } catch (err) {
+        return reply.code(400).send({
+          error: `Failed to read task file: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+    } else if (description && instructions) {
+      // Inline project task
+      taskPayload = validateTaskPayload({
+        description,
+        instructions,
+        seedDir: seedDir || undefined,
       });
+    } else {
+      return reply.code(400).send({
+        error: 'Provide either taskFile or description+instructions',
+      });
+    }
+
+    // If project context was provided, inject into agent config
+    if (systemPrompt || projectName) {
+      agentConfig = { systemPrompt: systemPrompt || undefined };
     }
 
     const tokenBudget = budget ?? envNumber('DEFAULT_TOKEN_BUDGET', 100_000);
@@ -112,7 +142,7 @@ export function registerRunRoutes(app: FastifyInstance, engine: RunEngine, db: D
           id: event.runId,
           agent,
           variant,
-          taskFile,
+          taskFile: taskFile ?? `project:${projectName ?? 'inline'}`,
           taskJson: JSON.stringify(taskPayload),
           budget: tokenBudget,
           ttlSeconds,
@@ -150,7 +180,7 @@ export function registerRunRoutes(app: FastifyInstance, engine: RunEngine, db: D
     engine.on('run:event', eventHandler);
 
     // Fire and forget — the run executes in the background
-    engine.startRun(runConfig, agent)
+    engine.startRun(runConfig, agent, agentConfig)
       .then(() => { engine.off('run:event', eventHandler); })
       .catch(() => { engine.off('run:event', eventHandler); });
 
