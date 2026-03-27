@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Task",
+  "description": "Schema for CRUCIBLE task entries in .agent/tasks.jsonl",
+  "type": "object",
+  "required": ["id", "description", "taskType", "status", "priority", "riskLevel", "blockedBy", "ownedPaths", "flowPhase", "assignedTo", "createdAt", "updatedAt"],
+  "properties": {
+    "id": { "type": "string" },
+    "description": { "type": "string" },
+    "taskType": { "type": "string", "enum": ["debug", "feature", "refactor", "chore"] },
+    "status": { "type": "string", "enum": ["pending", "in_progress", "complete", "blocked", "skipped"] },
+    "priority": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
+    "riskLevel": { "type": "string", "enum": ["low", "medium", "high"] },
+    "blockedBy": { "type": "array", "items": { "type": "string" } },
+    "ownedPaths": { "type": "array", "items": { "type": "string" } },
+    "flowPhase": { "type": ["string", "null"] },
+    "assignedTo": { "type": ["string", "null"] },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" }
+  }
+}

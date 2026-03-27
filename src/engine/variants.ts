@@ -2,6 +2,19 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import type { VariantConfig } from '../types/index.js';
+import type { DecompositionStrategyConfig } from './DecompositionEngine.js';
+import { DEFAULT_STRATEGY_CONFIG } from './DecompositionEngine.js';
+
+/**
+ * Extended variant config that includes optional decomposition strategy.
+ * This extends the base VariantConfig without modifying src/types/index.ts.
+ */
+export interface ExtendedVariantConfig extends VariantConfig {
+  decompositionStrategy?: DecompositionStrategyConfig & {
+    name: string;
+    fallback?: string;
+  };
+}
 
 /**
  * Load a variant config from a YAML file.
@@ -71,4 +84,42 @@ export async function loadVariant(variantPath: string): Promise<VariantConfig> {
   }
 
   return config;
+}
+
+/**
+ * Load a variant config with decomposition strategy support.
+ *
+ * Parses the standard VariantConfig fields plus `decomposition_strategy`
+ * from the YAML file.
+ */
+export async function loadExtendedVariant(variantPath: string): Promise<ExtendedVariantConfig> {
+  const base = await loadVariant(variantPath);
+  const content = await fs.readFile(variantPath, 'utf-8');
+  const raw = parseYaml(content) as Record<string, unknown>;
+
+  const extended: ExtendedVariantConfig = { ...base };
+
+  if (typeof raw['decomposition_strategy'] === 'object' && raw['decomposition_strategy'] !== null) {
+    const ds = raw['decomposition_strategy'] as Record<string, unknown>;
+    extended.decompositionStrategy = {
+      ...DEFAULT_STRATEGY_CONFIG,
+      name: typeof ds['name'] === 'string' ? ds['name'] : 'D0',
+      fallback: typeof ds['fallback'] === 'string' ? ds['fallback'] : undefined,
+      decomposition_trigger:
+        (ds['decomposition_trigger'] as DecompositionStrategyConfig['decomposition_trigger']) ??
+        DEFAULT_STRATEGY_CONFIG.decomposition_trigger,
+      max_depth:
+        typeof ds['max_depth'] === 'number' ? ds['max_depth'] : DEFAULT_STRATEGY_CONFIG.max_depth,
+      max_files_hint:
+        typeof ds['max_files_hint'] === 'number' ? ds['max_files_hint'] : DEFAULT_STRATEGY_CONFIG.max_files_hint,
+      three_conditions:
+        typeof ds['three_conditions'] === 'boolean' ? ds['three_conditions'] : DEFAULT_STRATEGY_CONFIG.three_conditions,
+      compositionality_check:
+        typeof ds['compositionality_check'] === 'boolean'
+          ? ds['compositionality_check']
+          : DEFAULT_STRATEGY_CONFIG.compositionality_check,
+    };
+  }
+
+  return extended;
 }

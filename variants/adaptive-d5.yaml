@@ -1,0 +1,12 @@
+name: adaptive-d5
+description: Adaptive decomposition with D4 fallback (ADaPT pattern)
+agent: coder
+
+decomposition_strategy:
+  name: "D5"
+  decomposition_trigger: "on-failure"
+  fallback: "D4"
+  max_depth: 3
+  max_files_hint: 3
+  three_conditions: true
+  compositionality_check: true

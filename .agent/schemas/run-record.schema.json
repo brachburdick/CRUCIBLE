@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RunRecord",
+  "description": "Schema for CRUCIBLE run records in .agent/runs.jsonl",
+  "type": "object",
+  "required": ["runId", "date", "projectId", "taskId", "taskType", "result", "summary", "filesTouched", "humanTouches"],
+  "properties": {
+    "runId": { "type": "string" },
+    "date": { "type": "string", "format": "date-time" },
+    "projectId": { "type": "string" },
+    "taskId": { "type": "string" },
+    "taskType": { "type": "string", "enum": ["debug", "feature", "refactor", "chore"] },
+    "result": { "type": "string", "enum": ["success", "partial", "failed", "escalated"] },
+    "summary": { "type": "string" },
+    "filesTouched": { "type": "array", "items": { "type": "string" } },
+    "humanTouches": {
+      "type": "object",
+      "required": ["questions", "corrections", "escalations", "approvals", "total"],
+      "properties": {
+        "questions": { "type": "number" },
+        "corrections": { "type": "number" },
+        "escalations": { "type": "number" },
+        "approvals": { "type": "number" },
+        "total": { "type": "number" }
+      }
+    }
+  }
+}

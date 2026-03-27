@@ -1,0 +1,208 @@
+{
+  "id": "graph-bugfix-cross-file-001",
+  "taskOrigin": {
+    "description": "Fix a pricing bug where discounts are applied incorrectly — root cause is in a different file than the symptom",
+    "instructions": "Users are reporting that the calculate_order_total function in orders.py returns wrong totals when discount codes are applied. Debug the issue and fix it. Run python test_orders.py to verify your fix.",
+    "files": {
+      "pricing.py": "(pricing module with discount logic)",
+      "orders.py": "(order processing module)",
+      "test_orders.py": "(test suite)"
+    },
+    "checks": [
+      { "name": "all tests pass", "type": "exec", "command": "cd /home/user && python test_orders.py" },
+      { "name": "fix is in pricing.py", "type": "exec", "command": "cd /home/user && python -c \"from pricing import get_discount_multiplier; assert get_discount_multiplier('SAVE20') == 0.8\"" }
+    ]
+  },
+  "pipelineDefinition": "debug-baseline",
+  "strategyUsed": "D4",
+  "createdAt": "2026-03-27T10:00:00Z",
+  "updatedAt": "2026-03-27T10:05:00Z",
+  "rootNodeId": "root",
+  "nodes": [
+    {
+      "id": "root",
+      "parentId": null,
+      "type": "goal",
+      "description": "Fix pricing bug: discounts applied incorrectly in calculate_order_total",
+      "acceptanceCriteria": [
+        "All 7 tests in test_orders.py pass",
+        "Fix is in pricing.py, not orders.py",
+        "No regressions in tax calculation"
+      ],
+      "ownedPaths": ["pricing.py", "orders.py"],
+      "inputs": [],
+      "outputs": [
+        { "nodeId": "root", "artifactId": "fixed-pricing", "type": "file" }
+      ],
+      "status": "completed",
+      "complexityEstimate": "simple",
+      "assignedTo": null,
+      "readiness": {
+        "gateMode": "triage",
+        "globalScore": 1.0,
+        "dynamicScore": 1.0,
+        "compositeScore": 1.0,
+        "globalWeight": 0.7,
+        "checks": [
+          { "rule": "has_acceptance_criteria", "source": "global", "binding": "hard", "passed": true, "detail": "3 testable acceptance criteria defined" },
+          { "rule": "has_scope_boundary", "source": "global", "binding": "hard", "passed": true, "detail": "files specified: pricing.py, orders.py" },
+          { "rule": "has_verification_command", "source": "global", "binding": "hard", "passed": true, "detail": "checks array with 2 exec checks" },
+          { "rule": "dependencies_resolved", "source": "global", "binding": "hard", "passed": true, "detail": "no declared dependencies" },
+          { "rule": "no_ambiguous_terms", "source": "global", "binding": "advisory", "passed": true, "detail": "no ambiguous terms found" },
+          { "rule": "risk_classified", "source": "global", "binding": "hard", "passed": true, "detail": "bugfix — low risk inferred from description" }
+        ],
+        "questionsGenerated": [],
+        "passedAt": "2026-03-27T10:00:01Z",
+        "falsePositiveHistory": null
+      },
+      "execution": null,
+      "artifacts": [],
+      "reasoning": [
+        {
+          "timestamp": "2026-03-27T10:00:00Z",
+          "phase": "decomposition",
+          "decision": "Decompose into diagnosis + fix nodes along module boundary",
+          "alternatives": ["Single leaf execution (D0)", "Goal-tree decomposition"],
+          "rationale": "Bug crosses file boundary (symptom in orders.py, root cause in pricing.py). D4 interface-first decomposition along module boundary is appropriate.",
+          "confidence": 0.9
+        }
+      ],
+      "metrics": {
+        "tokenUsage": { "prompt": 0, "completion": 0, "total": 0 },
+        "wallTimeMs": 0,
+        "mutations": 0,
+        "testCycles": 0,
+        "retries": 0
+      }
+    },
+    {
+      "id": "leaf-diagnose",
+      "parentId": "root",
+      "type": "leaf",
+      "description": "Diagnose the root cause: trace discount calculation from orders.py back to pricing.py",
+      "acceptanceCriteria": [
+        "Identify the buggy line in pricing.py",
+        "Explain why get_discount_multiplier returns wrong values"
+      ],
+      "ownedPaths": ["pricing.py", "orders.py"],
+      "inputs": [],
+      "outputs": [
+        { "nodeId": "leaf-diagnose", "artifactId": "diagnosis", "type": "log" }
+      ],
+      "status": "completed",
+      "complexityEstimate": "simple",
+      "assignedTo": "coder",
+      "readiness": {
+        "gateMode": "triage",
+        "globalScore": 1.0,
+        "dynamicScore": 1.0,
+        "compositeScore": 1.0,
+        "globalWeight": 0.7,
+        "checks": [],
+        "questionsGenerated": [],
+        "passedAt": "2026-03-27T10:00:02Z",
+        "falsePositiveHistory": null
+      },
+      "execution": {
+        "startedAt": "2026-03-27T10:01:00Z",
+        "completedAt": "2026-03-27T10:02:00Z",
+        "exitReason": { "type": "completed" },
+        "tokenUsage": { "prompt": 1200, "completion": 300, "total": 1500 },
+        "wallTimeMs": 60000,
+        "mutations": 0,
+        "testCycles": 0,
+        "toolCalls": [
+          { "name": "read_file", "count": 2, "totalDurationMs": 500 }
+        ],
+        "verificationResults": []
+      },
+      "artifacts": [],
+      "reasoning": [],
+      "metrics": {
+        "tokenUsage": { "prompt": 1200, "completion": 300, "total": 1500 },
+        "wallTimeMs": 60000,
+        "mutations": 0,
+        "testCycles": 0,
+        "retries": 0
+      }
+    },
+    {
+      "id": "leaf-fix",
+      "parentId": "root",
+      "type": "leaf",
+      "description": "Fix get_discount_multiplier: change 1.0 + (percentage / 100) to 1.0 - (percentage / 100)",
+      "acceptanceCriteria": [
+        "get_discount_multiplier('SAVE20') returns 0.8",
+        "All 7 tests pass"
+      ],
+      "ownedPaths": ["pricing.py"],
+      "inputs": [
+        { "nodeId": "leaf-diagnose", "artifactId": "diagnosis", "type": "log" }
+      ],
+      "outputs": [
+        { "nodeId": "leaf-fix", "artifactId": "fixed-pricing", "type": "file" }
+      ],
+      "status": "completed",
+      "complexityEstimate": "simple",
+      "assignedTo": "coder",
+      "readiness": {
+        "gateMode": "triage",
+        "globalScore": 1.0,
+        "dynamicScore": 1.0,
+        "compositeScore": 1.0,
+        "globalWeight": 0.7,
+        "checks": [],
+        "questionsGenerated": [],
+        "passedAt": "2026-03-27T10:02:01Z",
+        "falsePositiveHistory": null
+      },
+      "execution": {
+        "startedAt": "2026-03-27T10:02:30Z",
+        "completedAt": "2026-03-27T10:04:00Z",
+        "exitReason": { "type": "completed" },
+        "tokenUsage": { "prompt": 800, "completion": 200, "total": 1000 },
+        "wallTimeMs": 90000,
+        "mutations": 1,
+        "testCycles": 1,
+        "toolCalls": [
+          { "name": "write_file", "count": 1, "totalDurationMs": 200 },
+          { "name": "exec", "count": 1, "totalDurationMs": 3000 }
+        ],
+        "verificationResults": [
+          { "checkName": "all tests pass", "passed": true, "stdout": "All 7 tests passed", "stderr": "", "exitCode": 0 }
+        ]
+      },
+      "artifacts": [],
+      "reasoning": [],
+      "metrics": {
+        "tokenUsage": { "prompt": 800, "completion": 200, "total": 1000 },
+        "wallTimeMs": 90000,
+        "mutations": 1,
+        "testCycles": 1,
+        "retries": 0
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "leaf-diagnose",
+      "to": "leaf-fix",
+      "type": "data",
+      "contract": null,
+      "couplingType": "data",
+      "couplingSource": "static",
+      "couplingConfidence": 0.95
+    }
+  ],
+  "status": "completed",
+  "metrics": {
+    "totalTokens": 2500,
+    "totalWallTimeMs": 150000,
+    "nodeCount": 3,
+    "leafCount": 2,
+    "completedCount": 3,
+    "failedCount": 0,
+    "maxDepth": 1,
+    "averageCouplingConfidence": 0.95
+  }
+}

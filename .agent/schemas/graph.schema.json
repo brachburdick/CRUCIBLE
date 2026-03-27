@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DecompositionGraph",
+  "description": "Schema for CRUCIBLE decomposition graph files (graph.json)",
+  "type": "object",
+  "required": ["id", "taskOrigin", "pipelineDefinition", "strategyUsed", "createdAt", "updatedAt", "rootNodeId", "nodes", "edges", "status", "metrics"],
+  "properties": {
+    "id": { "type": "string" },
+    "taskOrigin": {
+      "type": "object",
+      "required": ["description", "instructions"],
+      "properties": {
+        "description": { "type": "string" },
+        "instructions": { "type": "string" },
+        "files": { "type": "object" },
+        "seedDir": { "type": "string" },
+        "networkAllowlist": { "type": "array", "items": { "type": "string" } },
+        "checks": { "type": "array" }
+      }
+    },
+    "pipelineDefinition": { "type": "string" },
+    "strategyUsed": { "type": "string" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "rootNodeId": { "type": "string" },
+    "nodes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/DecompositionNode" }
+    },
+    "edges": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/DependencyEdge" }
+    },
+    "status": {
+      "type": "string",
+      "enum": ["decomposing", "executing", "completed", "failed", "budget_exceeded"]
+    },
+    "metrics": { "$ref": "#/$defs/GraphMetrics" }
+  },
+  "$defs": {
+    "DecompositionNode": {
+      "type": "object",
+      "required": ["id", "parentId", "type", "description", "acceptanceCriteria", "ownedPaths", "inputs", "outputs", "status", "readiness", "artifacts", "reasoning", "metrics"],
+      "properties": {
+        "id": { "type": "string" },
+        "parentId": { "type": ["string", "null"] },
+        "type": { "type": "string", "enum": ["goal", "milestone", "task", "leaf"] },
+        "description": { "type": "string" },
+        "acceptanceCriteria": { "type": "array", "items": { "type": "string" } },
+        "ownedPaths": { "type": "array", "items": { "type": "string" } },
+        "inputs": { "type": "array", "items": { "$ref": "#/$defs/ArtifactRef" } },
+        "outputs": { "type": "array", "items": { "$ref": "#/$defs/ArtifactRef" } },
+        "status": { "type": "string", "enum": ["pending", "ready", "active", "completed", "failed", "blocked", "skipped"] },
+        "complexityEstimate": { "type": ["string", "null"], "enum": ["simple", "moderate", "complex", null] },
+        "assignedTo": { "type": ["string", "null"] },
+        "readiness": { "$ref": "#/$defs/ReadinessAssessment" },
+        "execution": {},
+        "artifacts": { "type": "array" },
+        "reasoning": { "type": "array" },
+        "metrics": { "$ref": "#/$defs/NodeMetrics" }
+      }
+    },
+    "DependencyEdge": {
+      "type": "object",
+      "required": ["from", "to", "type", "couplingType", "couplingSource", "couplingConfidence"],
+      "properties": {
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "type": { "type": "string", "enum": ["data", "sequence", "contract"] },
+        "contract": {},
+        "couplingType": { "type": "string", "enum": ["data", "stamp", "control", "common", "content"] },
+        "couplingSource": { "type": "string", "enum": ["static", "llm-inferred", "hybrid"] },
+        "couplingConfidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "ReadinessAssessment": {
+      "type": "object",
+      "required": ["gateMode", "globalScore", "dynamicScore", "compositeScore", "globalWeight", "checks", "questionsGenerated"],
+      "properties": {
+        "gateMode": { "type": "string", "enum": ["hard-block", "triage"] },
+        "globalScore": { "type": "number" },
+        "dynamicScore": { "type": "number" },
+        "compositeScore": { "type": "number" },
+        "globalWeight": { "type": "number" },
+        "checks": { "type": "array" },
+        "questionsGenerated": { "type": "array" },
+        "passedAt": { "type": ["string", "null"] },
+        "falsePositiveHistory": { "type": ["number", "null"] }
+      }
+    },
+    "ArtifactRef": {
+      "type": "object",
+      "required": ["nodeId", "artifactId", "type"],
+      "properties": {
+        "nodeId": { "type": "string" },
+        "artifactId": { "type": "string" },
+        "type": { "type": "string" }
+      }
+    },
+    "NodeMetrics": {
+      "type": "object",
+      "required": ["tokenUsage", "wallTimeMs", "mutations", "testCycles", "retries"],
+      "properties": {
+        "tokenUsage": {
+          "type": "object",
+          "required": ["prompt", "completion", "total"],
+          "properties": {
+            "prompt": { "type": "number" },
+            "completion": { "type": "number" },
+            "total": { "type": "number" }
+          }
+        },
+        "wallTimeMs": { "type": "number" },
+        "mutations": { "type": "number" },
+        "testCycles": { "type": "number" },
+        "retries": { "type": "number" }
+      }
+    },
+    "GraphMetrics": {
+      "type": "object",
+      "required": ["totalTokens", "totalWallTimeMs", "nodeCount", "leafCount", "completedCount", "failedCount", "maxDepth", "averageCouplingConfidence"],
+      "properties": {
+        "totalTokens": { "type": "number" },
+        "totalWallTimeMs": { "type": "number" },
+        "nodeCount": { "type": "number" },
+        "leafCount": { "type": "number" },
+        "completedCount": { "type": "number" },
+        "failedCount": { "type": "number" },
+        "maxDepth": { "type": "number" },
+        "averageCouplingConfidence": { "type": "number" }
+      }
+    }
+  }
+}

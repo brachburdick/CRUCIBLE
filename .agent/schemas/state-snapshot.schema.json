@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StateSnapshot",
+  "description": "Schema for CRUCIBLE session state snapshots (.agent/state-snapshot.json)",
+  "type": "object",
+  "required": ["sessionId", "timestamp", "branch", "lastCommit", "activeTasks", "modifiedFiles", "sessionKnowledge", "sessionFriction"],
+  "properties": {
+    "sessionId": { "type": "string" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "branch": { "type": "string" },
+    "lastCommit": { "type": "string" },
+    "activeTasks": { "type": "array", "items": { "type": "string" } },
+    "modifiedFiles": { "type": "array", "items": { "type": "string" } },
+    "sessionKnowledge": { "$ref": "#/$defs/SessionKnowledge" },
+    "sessionFriction": { "$ref": "#/$defs/SessionFriction" }
+  },
+  "$defs": {
+    "SessionKnowledge": {
+      "type": "object",
+      "required": ["decisions", "keyLocations", "deadEnds", "openQuestions"],
+      "properties": {
+        "decisions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["timestamp", "nodeId", "decision", "rationale"],
+            "properties": {
+              "timestamp": { "type": "string", "format": "date-time" },
+              "nodeId": { "type": ["string", "null"] },
+              "decision": { "type": "string" },
+              "rationale": { "type": "string" }
+            }
+          }
+        },
+        "keyLocations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path", "description", "discoveredAt"],
+            "properties": {
+              "path": { "type": "string" },
+              "description": { "type": "string" },
+              "discoveredAt": { "type": "string", "format": "date-time" }
+            }
+          }
+        },
+        "deadEnds": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["approach", "reason", "discoveredAt"],
+            "properties": {
+              "approach": { "type": "string" },
+              "reason": { "type": "string" },
+              "discoveredAt": { "type": "string", "format": "date-time" }
+            }
+          }
+        },
+        "openQuestions": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "SessionFriction": {
+      "type": "object",
+      "required": ["mutationsSinceTest", "totalMutations", "testCycles", "uniqueFilesModified"],
+      "properties": {
+        "mutationsSinceTest": { "type": "number" },
+        "totalMutations": { "type": "number" },
+        "testCycles": { "type": "number" },
+        "uniqueFilesModified": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

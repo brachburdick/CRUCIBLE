@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Question",
+  "description": "Schema for CRUCIBLE async question entries in .agent/questions.jsonl",
+  "type": "object",
+  "required": ["id", "task", "question", "options", "default", "impact", "status", "asked", "answered", "answer"],
+  "properties": {
+    "id": { "type": "string" },
+    "task": { "type": "string" },
+    "question": { "type": "string" },
+    "options": { "type": "array", "items": { "type": "string" } },
+    "default": { "type": "string" },
+    "impact": { "type": "string" },
+    "status": { "type": "string", "enum": ["pending", "answered", "dismissed"] },
+    "asked": { "type": "string", "format": "date-time" },
+    "answered": { "type": ["string", "null"], "format": "date-time" },
+    "answer": { "type": ["string", "null"] }
+  }
+}
