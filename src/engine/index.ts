@@ -30,3 +30,11 @@ export type { ExtendedVariantConfig } from './variants.js';
 // Phase 2.5: Session model
 export { SessionModel } from '../session/index.js';
 export type { SessionModelConfig } from '../session/index.js';
+
+// Phase 3: Graph executor
+export { GraphExecutor, detectFlowType } from './GraphExecutor.js';
+export type { GraphExecutorConfig, GraphExecutionResult, GraphExecutorEvent, SandboxContext } from './GraphExecutor.js';
+export { NodeScheduler } from './NodeScheduler.js';
+export type { SchedulerState } from './NodeScheduler.js';
+export { buildNodePrompt } from './PromptBuilder.js';
+export type { PromptBuilderContext } from './PromptBuilder.js';
