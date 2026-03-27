@@ -27,13 +27,21 @@ export function useFetch<T>(url: string, deps: unknown[] = []) {
   return { data, loading, error, refetch }
 }
 
-export async function postRun(body: {
-  taskFile: string
+export interface RunParams {
+  taskFile?: string
   agent: string
   variant: string
   budget: number
   ttl: number
-}): Promise<{ runId?: string; message?: string }> {
+  // Project-based launch
+  projectName?: string
+  description?: string
+  instructions?: string
+  seedDir?: string
+  systemPrompt?: string
+}
+
+export async function postRun(body: RunParams): Promise<{ runId?: string; message?: string }> {
   const res = await fetch('/api/runs', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

@@ -1,3 +1,25 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  :root {
+    /* Warm dark palette — slate nudged towards brown/orange */
+    --crucible-bg-deep: #13100c;     /* deepest background — warm espresso */
+    --crucible-bg: #1a1510;           /* main background */
+    --crucible-bg-card: #211b14;      /* card/panel background */
+    --crucible-border: #302820;       /* borders — warm sepia */
+    --crucible-border-subtle: #211b14;
+  }
+}
+
+/* Override Tailwind's slate-950 usage with warm tones */
+.bg-slate-950 { background-color: var(--crucible-bg-deep) !important; }
+.bg-slate-900 { background-color: var(--crucible-bg-card) !important; }
+.border-slate-800 { border-color: var(--crucible-border) !important; }
+.bg-slate-800 { background-color: #302820 !important; }
+.hover\:bg-slate-800\/30:hover { background-color: rgba(48, 40, 32, 0.3) !important; }
+.hover\:bg-slate-800\/50:hover { background-color: rgba(48, 40, 32, 0.5) !important; }
+.bg-slate-800\/50 { background-color: rgba(48, 40, 32, 0.5) !important; }
+.bg-slate-800\/30 { background-color: rgba(48, 40, 32, 0.3) !important; }
+.bg-slate-700 { background-color: #4a3f34 !important; }

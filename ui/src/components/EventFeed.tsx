@@ -2,8 +2,8 @@ import { useEffect, useRef } from 'react'
 import type { WsMessage } from '../hooks/useWebSocket'
 
 const eventStyles: Record<string, string> = {
-  run_started: 'text-blue-400',
-  sandbox_created: 'text-blue-300',
+  run_started: 'text-orange-400',
+  sandbox_created: 'text-orange-300',
   token_warning: 'text-yellow-400',
   loop_warning: 'text-orange-400',
   agent_completed: 'text-green-400',

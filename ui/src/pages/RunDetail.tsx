@@ -5,6 +5,7 @@ import { useWebSocket, type WsMessage } from '../hooks/useWebSocket'
 import RunStatusBadge from '../components/RunStatusBadge'
 import TokenProgressBar from '../components/TokenProgressBar'
 import EventFeed from '../components/EventFeed'
+import NavBar from '../components/NavBar'
 
 interface RunDetail {
   id: string
@@ -91,17 +92,19 @@ export default function RunDetailPage() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200">
-      {/* Header */}
-      <header className="border-b border-slate-800 px-6 py-4 flex items-center justify-between">
+      <NavBar />
+
+      {/* Run Header */}
+      <div className="max-w-5xl mx-auto px-6 pt-4 flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Link to="/" className="text-slate-500 hover:text-slate-300 text-sm">&larr; Back</Link>
+          <Link to="/" className="text-slate-500 hover:text-orange-300 text-sm">&larr; Back</Link>
           <div>
-            <h1 className="text-lg font-bold tracking-tight font-mono">{run.id.slice(0, 8)}</h1>
+            <h1 className="text-lg font-bold tracking-tight font-mono text-orange-400">{run.id.slice(0, 8)}</h1>
             <p className="text-sm text-slate-500">{run.variant} / {run.agent}</p>
           </div>
         </div>
         <RunStatusBadge status={run.status} />
-      </header>
+      </div>
 
       <div className="max-w-5xl mx-auto px-6 py-6 space-y-6">
         {/* Config Summary */}

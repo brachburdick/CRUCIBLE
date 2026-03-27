@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useFetch } from '../hooks/useApi'
 import { useWebSocket } from '../hooks/useWebSocket'
 import RunStatusBadge from '../components/RunStatusBadge'
 import LaunchForm from '../components/LaunchForm'
+import type { LaunchPreFill } from '../components/LaunchForm'
+import NavBar from '../components/NavBar'
 
 interface RunRow {
   id: string
@@ -18,9 +20,20 @@ interface RunRow {
 
 export default function Dashboard() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { data: runs, refetch } = useFetch<RunRow[]>('/api/runs')
   const { messages } = useWebSocket()
-  const [showLaunch, setShowLaunch] = useState(false)
+
+  // Check if navigated here with pre-fill state from Projects page
+  const preFill = (location.state as { preFill?: LaunchPreFill } | null)?.preFill
+  const [showLaunch, setShowLaunch] = useState(!!preFill)
+
+  // Clear location state after reading it (so refresh doesn't re-open)
+  useEffect(() => {
+    if (preFill) {
+      window.history.replaceState({}, '')
+    }
+  }, [preFill])
 
   // Refetch run list when status changes come in
   useEffect(() => {
@@ -34,29 +47,32 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200">
-      {/* Header */}
-      <header className="border-b border-slate-800 px-6 py-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight">CRUCIBLE</h1>
-          <p className="text-sm text-slate-500">Agent Evaluation Harness</p>
-        </div>
+      <NavBar />
+
+      {/* Action Bar */}
+      <div className="max-w-5xl mx-auto px-6 pt-4 flex justify-end">
         <button
           onClick={() => setShowLaunch(!showLaunch)}
-          className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium py-2 px-4 rounded transition-colors"
+          className="bg-orange-600 hover:bg-orange-500 text-white text-sm font-medium py-2 px-4 rounded transition-colors"
         >
           {showLaunch ? 'Cancel' : 'New Run'}
         </button>
-      </header>
+      </div>
 
       <div className="max-w-5xl mx-auto px-6 py-6">
         {/* Launch Form */}
         {showLaunch && (
           <div className="mb-6 bg-slate-900 border border-slate-800 rounded-lg p-6">
-            <h2 className="text-lg font-semibold mb-4">Launch Run</h2>
-            <LaunchForm onLaunched={(runId) => {
-              setShowLaunch(false)
-              navigate(`/runs/${runId}`)
-            }} />
+            <h2 className="text-lg font-semibold mb-4">
+              {preFill?.projectName ? `Launch Run — ${preFill.projectName}` : 'Launch Run'}
+            </h2>
+            <LaunchForm
+              onLaunched={(runId) => {
+                setShowLaunch(false)
+                navigate(`/runs/${runId}`)
+              }}
+              preFill={preFill}
+            />
           </div>
         )}
 
@@ -79,7 +95,7 @@ export default function Dashboard() {
                 runs.map(run => (
                   <tr key={run.id} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors">
                     <td className="px-4 py-3">
-                      <Link to={`/runs/${run.id}`} className="text-blue-400 hover:text-blue-300 font-mono text-xs">
+                      <Link to={`/runs/${run.id}`} className="text-orange-400 hover:text-orange-300 font-mono text-xs">
                         {run.id.slice(0, 8)}
                       </Link>
                     </td>
