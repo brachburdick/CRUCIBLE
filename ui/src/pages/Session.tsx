@@ -4,13 +4,14 @@ import NavBar from '../components/NavBar'
 import QuestionForm from '../components/QuestionForm'
 import { TaskStatusBadge, PriorityBadge, RiskBadge } from '../components/TaskStatusBadge'
 
-type Tab = 'questions' | 'run-history' | 'snapshot' | 'tasks'
+type Tab = 'questions' | 'run-history' | 'snapshot' | 'tasks' | 'metrics'
 
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'questions', label: 'Questions' },
   { id: 'run-history', label: 'Run History' },
   { id: 'snapshot', label: 'State Snapshot' },
   { id: 'tasks', label: 'Task Queue' },
+  { id: 'metrics', label: 'Metrics' },
 ]
 
 // ─── Types ─────────────────────────────────────────────────────────────
@@ -297,6 +298,160 @@ function TaskQueueTab() {
   )
 }
 
+// ─── Tab: Metrics ─────────────────────────────────────────────────────
+
+interface SessionMetrics {
+  session_id: string
+  project: string
+  title: string
+  first_timestamp: string
+  total_input_tokens: number
+  total_output_tokens: number
+  total_cache_read: number
+  total_cache_creation: number
+  peak_context: number
+  peak_context_pct: number
+  turn_count: number
+  mtime: number
+}
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+  return String(n)
+}
+
+function TokenBar({ label, value, max, color }: { label: string; value: number; max: number; color: string }) {
+  const pct = max > 0 ? Math.min((value / max) * 100, 100) : 0
+  return (
+    <div className="space-y-1">
+      <div className="flex justify-between text-xs">
+        <span className="text-slate-400">{label}</span>
+        <span className="text-slate-300 font-mono">{formatTokens(value)}</span>
+      </div>
+      <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+        <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  )
+}
+
+function ContextGauge({ pct }: { pct: number }) {
+  const clampedPct = Math.min(pct, 100)
+  const color = clampedPct > 80 ? 'text-red-400' : clampedPct > 50 ? 'text-yellow-400' : 'text-green-400'
+  const barColor = clampedPct > 80 ? 'bg-red-500' : clampedPct > 50 ? 'bg-yellow-500' : 'bg-green-500'
+  return (
+    <div className="space-y-1">
+      <div className="flex justify-between text-xs">
+        <span className="text-slate-400">Peak Context</span>
+        <span className={`font-mono font-bold ${color}`}>{clampedPct.toFixed(1)}%</span>
+      </div>
+      <div className="h-3 bg-slate-800 rounded-full overflow-hidden">
+        <div className={`h-full rounded-full ${barColor}`} style={{ width: `${clampedPct}%` }} />
+      </div>
+    </div>
+  )
+}
+
+function SessionCard({ s, isCurrent }: { s: SessionMetrics; isCurrent: boolean }) {
+  const totalTokens = s.total_input_tokens + s.total_output_tokens + s.total_cache_read + s.total_cache_creation
+  const maxBar = Math.max(s.total_input_tokens, s.total_output_tokens, s.total_cache_read, s.total_cache_creation, 1)
+
+  return (
+    <div className={`rounded-lg p-4 space-y-3 ${
+      isCurrent ? 'bg-orange-500/10 border border-orange-500/30' : 'bg-slate-800/40 border border-slate-800'
+    }`}>
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            {isCurrent && (
+              <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-500/20 text-orange-400 border border-orange-500/30">
+                CURRENT
+              </span>
+            )}
+            <p className="text-sm text-slate-200 truncate">{s.title}</p>
+          </div>
+          <p className="text-xs text-slate-500 mt-0.5">
+            {s.first_timestamp ? new Date(s.first_timestamp).toLocaleString() : '—'}
+            {' · '}{s.turn_count} turns
+            {' · '}{formatTokens(totalTokens)} total tokens
+          </p>
+        </div>
+        <span className="text-xs text-slate-600 font-mono shrink-0">{s.session_id.slice(0, 8)}</span>
+      </div>
+
+      <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+        <TokenBar label="Input Tokens" value={s.total_input_tokens} max={maxBar} color="bg-blue-500" />
+        <TokenBar label="Output Tokens" value={s.total_output_tokens} max={maxBar} color="bg-purple-500" />
+        <TokenBar label="Cache Read" value={s.total_cache_read} max={maxBar} color="bg-cyan-500" />
+        <TokenBar label="Cache Creation" value={s.total_cache_creation} max={maxBar} color="bg-teal-500" />
+      </div>
+
+      <ContextGauge pct={s.peak_context_pct} />
+    </div>
+  )
+}
+
+function MetricsTab() {
+  const { data: sessions, loading, error } = useFetch<SessionMetrics[]>('/api/sessions/metrics?limit=20')
+  const [showAll, setShowAll] = useState(false)
+
+  if (loading) return <p className="text-slate-500 text-sm">Loading metrics...</p>
+  if (error) return <p className="text-red-400 text-sm">Error loading metrics: {error}</p>
+  if (!sessions || sessions.length === 0) return <p className="text-sm text-slate-500">No session transcripts found.</p>
+
+  const current = sessions[0]
+  const rest = sessions.slice(1)
+  const visible = showAll ? rest : rest.slice(0, 4)
+
+  return (
+    <div className="space-y-6">
+      {/* Aggregate summary */}
+      <div className="grid grid-cols-4 gap-4">
+        {[
+          { label: 'Sessions', value: sessions.length },
+          { label: 'Total Turns', value: sessions.reduce((a, s) => a + s.turn_count, 0) },
+          { label: 'Total Output', value: formatTokens(sessions.reduce((a, s) => a + s.total_output_tokens, 0)) },
+          { label: 'Avg Peak Context', value: `${(sessions.reduce((a, s) => a + s.peak_context_pct, 0) / sessions.length).toFixed(1)}%` },
+        ].map(s => (
+          <div key={s.label} className="bg-slate-800/50 rounded-lg p-3">
+            <p className="text-xs text-slate-500">{s.label}</p>
+            <p className="text-xl font-bold text-slate-200">{s.value}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Current session */}
+      <div>
+        <h3 className="text-sm font-semibold text-slate-300 mb-2">Current Session</h3>
+        <SessionCard s={current} isCurrent={true} />
+      </div>
+
+      {/* Recent sessions */}
+      {rest.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-semibold text-slate-400">Recent Sessions ({rest.length})</h3>
+            {rest.length > 4 && (
+              <button
+                onClick={() => setShowAll(!showAll)}
+                className="text-xs text-orange-400 hover:text-orange-300"
+              >
+                {showAll ? 'Show less' : `Show all ${rest.length}`}
+              </button>
+            )}
+          </div>
+          <div className="space-y-3">
+            {visible.map(s => (
+              <SessionCard key={s.session_id} s={s} isCurrent={false} />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Main Page ─────────────────────────────────────────────────────────
 
 export default function Session() {
@@ -330,6 +485,7 @@ export default function Session() {
           {activeTab === 'run-history' && <RunHistoryTab />}
           {activeTab === 'snapshot' && <SnapshotTab />}
           {activeTab === 'tasks' && <TaskQueueTab />}
+          {activeTab === 'metrics' && <MetricsTab />}
         </div>
       </div>
     </div>

@@ -6,11 +6,16 @@ const eventStyles: Record<string, string> = {
   sandbox_created: 'text-orange-300',
   token_warning: 'text-yellow-400',
   loop_warning: 'text-orange-400',
+  agent_thinking: 'text-blue-300',
+  agent_tool_call: 'text-cyan-400',
+  agent_tool_result: 'text-purple-400',
+  agent_turn_complete: 'text-slate-500',
   agent_completed: 'text-green-400',
   kill: 'text-red-400',
   run_completed: 'text-slate-300',
   error: 'text-red-500',
   teardown_step_failed: 'text-red-500',
+  flow_detected: 'text-slate-400',
 }
 
 function formatEventData(event: string, data: Record<string, unknown>): string {
@@ -33,6 +38,31 @@ function formatEventData(event: string, data: Record<string, unknown>): string {
       const exitReason = data.exitReason as Record<string, unknown> | undefined
       return `exit=${exitReason?.type ?? 'unknown'} tokens=${Number(data.tokenCount).toLocaleString()} wall=${(Number(data.wallTimeMs) / 1000).toFixed(1)}s`
     }
+    case 'agent_thinking': {
+      const txt = String(data.content ?? '')
+      const usage = data.usage as { promptTokens?: number; completionTokens?: number } | undefined
+      const tokens = usage ? ` [${Number(usage.promptTokens ?? 0).toLocaleString()}→${Number(usage.completionTokens ?? 0).toLocaleString()}]` : ''
+      return `Turn ${data.turn}: ${txt.length > 120 ? txt.slice(0, 120) + '...' : txt}${tokens}`
+    }
+    case 'agent_tool_call': {
+      const input = data.toolInput as Record<string, unknown> | undefined
+      let summary = ''
+      if (data.toolName === 'read_file') summary = String(input?.path ?? '')
+      else if (data.toolName === 'write_file') summary = String(input?.path ?? '')
+      else if (data.toolName === 'exec') summary = String(input?.command ?? '').slice(0, 80)
+      else if (data.toolName === 'task_complete') summary = String(input?.summary ?? '').slice(0, 80)
+      else summary = JSON.stringify(input ?? {}).slice(0, 80)
+      return `Turn ${data.turn}: ${data.toolName}(${summary})`
+    }
+    case 'agent_tool_result': {
+      const res = String(data.content ?? '').slice(0, 80)
+      const status = data.isError ? 'ERROR' : 'ok'
+      return `Turn ${data.turn}: ${data.toolName} → ${status} ${res}`
+    }
+    case 'agent_turn_complete':
+      return `Turn ${data.turn} complete — ${Number(data.cumulativeTokens).toLocaleString()} tokens`
+    case 'flow_detected':
+      return `${data.flowType} flow — phases: ${(data.phases as string[])?.join(', ') ?? ''}`
     case 'error':
       return String(data.error ?? '')
     default:

@@ -72,6 +72,10 @@ export default function RunDetailPage() {
   const liveTokenCount = useMemo(() => {
     for (let i = allEvents.length - 1; i >= 0; i--) {
       const evt = allEvents[i]
+      if (evt.event === 'agent_turn_complete') {
+        const count = evt.data.cumulativeTokens
+        if (typeof count === 'number') return count
+      }
       if (evt.event === 'token_warning' || evt.event === 'kill' || evt.event === 'run_completed') {
         const count = evt.data.tokenCount ?? evt.data.currentCount
         if (typeof count === 'number') return count
