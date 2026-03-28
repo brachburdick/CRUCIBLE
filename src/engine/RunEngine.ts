@@ -1,6 +1,10 @@
 import { EventEmitter } from 'node:events';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
+import * as os from 'node:os';
 import type {
   AgentFn,
+  AgentTurnEvent,
   KillReason,
   RunConfig,
   RunResult,
@@ -20,6 +24,8 @@ import { runChecks } from './scorer.js';
 import { detectFlowType } from './GraphExecutor.js';
 import { getFlowTemplate } from '../session/flow-templates.js';
 import { createRunRecord } from '../session/run-record.js';
+import { runClaudeCliAgent, type CliAgentResult } from '../agents/cli-runner.js';
+import { DockerRunner } from '../sandbox/docker-runner.js';
 import type { SessionModel } from '../session/index.js';
 import type { ScoreResult } from '../types/index.js';
 import type { FlowTemplate } from '../session/types.js';
@@ -109,6 +115,16 @@ export class RunEngine extends EventEmitter {
       taskDescription: config.taskPayload.description,
     });
 
+    // ─── CLI agent path: uses Claude Code subscription, no E2B sandbox ───
+    if (agentName === 'claude-cli') {
+      return this.startCliRun(runId, config, agentConfig, startedAt, tracer);
+    }
+
+    // ─── Docker CLI path: subscription auth + full container isolation ───
+    if (agentName === 'docker-cli') {
+      return this.startDockerCliRun(runId, config, agentConfig, startedAt, tracer);
+    }
+
     // Create sandbox
     const sandboxRunner = await SandboxRunner.create(config);
     this.emitRunEvent(runId, 'sandbox_created', {});
@@ -192,6 +208,14 @@ export class RunEngine extends EventEmitter {
 
       this.emitRunEvent(runId, 'flow_detected', { flowType, phases: flow.phases.map(p => p.name) });
     }
+
+    // Inject onTurn callback for per-turn visibility
+    effectiveAgentConfig = {
+      ...effectiveAgentConfig,
+      onTurn: (turnEvent: AgentTurnEvent) => {
+        this.emitRunEvent(runId, turnEvent.type, turnEvent as unknown as Record<string, unknown>);
+      },
+    };
 
     // Run agent
     let killReason: KillReason;
@@ -310,6 +334,508 @@ export class RunEngine extends EventEmitter {
     }
 
     return result;
+  }
+
+  /**
+   * Docker-isolated CLI run: Claude CLI inside a Docker container.
+   *
+   * Full isolation (process, filesystem, network) with subscription auth.
+   * The DockerRunner handles container lifecycle, file seeding, and cleanup.
+   * Stream-json parsing is identical to the bare CLI path.
+   */
+  private async startDockerCliRun(
+    runId: string,
+    config: RunConfig,
+    agentConfig: Record<string, unknown> | undefined,
+    startedAt: Date,
+    tracer: RunTracer,
+  ): Promise<RunResult> {
+    // Build system prompt with flow template
+    let systemPrompt = (agentConfig?.systemPrompt as string) ?? '';
+    if (this.session) {
+      const flowType = detectFlowType(config.taskPayload.description);
+      const flow = getFlowTemplate(flowType);
+      const flowPromptSection = this.buildFlowPromptSection(flow);
+      systemPrompt = flowPromptSection + (systemPrompt ? '\n\n' + systemPrompt : '');
+      this.emitRunEvent(runId, 'flow_detected', { flowType, phases: flow.phases.map(p => p.name) });
+    }
+
+    let runner: DockerRunner | null = null;
+
+    try {
+      // Create Docker container, seed files
+      runner = await DockerRunner.create({
+        runId,
+        taskPayload: config.taskPayload,
+        ttlSeconds: config.ttlSeconds,
+        systemPrompt,
+        model: agentConfig?.model as string | undefined,
+        maxTurns: (agentConfig?.maxTurns as number | undefined) ?? 50,
+        maxBudgetUsd: agentConfig?.maxBudgetUsd as number | undefined,
+        allowedTools: (agentConfig?.allowedTools as string[] | undefined) ?? [
+          'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep',
+        ],
+        disallowedTools: agentConfig?.disallowedTools as string[] | undefined,
+        extraFlags: agentConfig?.extraFlags as string[] | undefined,
+        imageTag: agentConfig?.imageTag as string | undefined,
+        dockerfilePath: agentConfig?.dockerfilePath as string | undefined,
+        memoryLimit: agentConfig?.memoryLimit as string | undefined,
+        cpuLimit: agentConfig?.cpuLimit as number | undefined,
+        onTurn: (turnEvent: AgentTurnEvent) => {
+          this.emitRunEvent(runId, turnEvent.type, turnEvent as unknown as Record<string, unknown>);
+        },
+      });
+
+      this.emitRunEvent(runId, 'docker_container_created', { runId });
+
+      // Run the agent inside the container
+      const cliResult = await runner.run({
+        runId,
+        taskPayload: config.taskPayload,
+        ttlSeconds: config.ttlSeconds,
+        systemPrompt,
+        model: agentConfig?.model as string | undefined,
+        maxTurns: (agentConfig?.maxTurns as number | undefined) ?? 50,
+        maxBudgetUsd: agentConfig?.maxBudgetUsd as number | undefined,
+        allowedTools: (agentConfig?.allowedTools as string[] | undefined) ?? [
+          'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep',
+        ],
+        disallowedTools: agentConfig?.disallowedTools as string[] | undefined,
+        extraFlags: agentConfig?.extraFlags as string[] | undefined,
+        onTurn: (turnEvent: AgentTurnEvent) => {
+          this.emitRunEvent(runId, turnEvent.type, turnEvent as unknown as Record<string, unknown>);
+        },
+      });
+
+      // Map CLI result to KillReason
+      let killReason: KillReason;
+      switch (cliResult.killReason) {
+        case 'completed':
+          killReason = { type: 'completed' };
+          this.emitRunEvent(runId, 'agent_completed', { finalMessage: cliResult.finalMessage });
+          break;
+        case 'ttl_exceeded':
+          killReason = {
+            type: 'ttl_exceeded',
+            wallTimeMs: cliResult.durationMs,
+            ttlMs: config.ttlSeconds * 1000,
+          };
+          break;
+        case 'stopped':
+          killReason = { type: 'completed' };
+          this.emitRunEvent(runId, 'agent_completed', {
+            finalMessage: `Turn limit reached. ${cliResult.finalMessage}`,
+          });
+          break;
+        case 'rate_limited':
+          killReason = { type: 'completed' };
+          this.emitRunEvent(runId, 'rate_limited', {
+            message: 'Claude Code subscription rate limit hit',
+          });
+          break;
+        default:
+          killReason = { type: 'completed' };
+          this.emitRunEvent(runId, 'error', {
+            error: cliResult.stderr || cliResult.finalMessage || 'Docker CLI agent error',
+          });
+          break;
+      }
+
+      // Run acceptance checks inside the container (before teardown)
+      let scoreResult: ScoreResult | undefined;
+      if (config.taskPayload.checks && config.taskPayload.checks.length > 0 && killReason.type === 'completed') {
+        try {
+          scoreResult = await runner.runChecks(config.taskPayload.checks);
+          this.emitRunEvent(runId, 'checks_completed', {
+            passRate: scoreResult.passRate,
+            checks: scoreResult.checks.map(c => ({ name: c.name, passed: c.passed })),
+          });
+        } catch (err) {
+          this.emitRunEvent(runId, 'checks_error', {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+
+      // Flush artifacts from container to host
+      const artifactManifest = await runner.flushArtifacts(runId);
+
+      // Cleanup
+      this.activeRuns.delete(runId);
+      const completedAt = new Date();
+      const totalTokens = cliResult.usage.inputTokens + cliResult.usage.outputTokens;
+
+      const result: RunResult = {
+        runId,
+        variantLabel: config.variantLabel,
+        exitReason: killReason,
+        tokenUsage: {
+          promptTokens: cliResult.usage.inputTokens,
+          completionTokens: cliResult.usage.outputTokens,
+          totalTokens,
+        },
+        wallTimeMs: completedAt.getTime() - startedAt.getTime(),
+        startedAt: startedAt.toISOString(),
+        completedAt: completedAt.toISOString(),
+        artifacts: artifactManifest,
+        metadata: {
+          ...(scoreResult ? { scores: scoreResult } : {}),
+          cliSessionId: cliResult.sessionId,
+          totalCostUsd: cliResult.totalCostUsd,
+          numTurns: cliResult.numTurns,
+          executionMode: 'docker-cli',
+        },
+      };
+
+      this.emitRunEvent(runId, 'run_completed', {
+        exitReason: killReason,
+        tokenCount: totalTokens,
+        wallTimeMs: result.wallTimeMs,
+        totalCostUsd: cliResult.totalCostUsd,
+        scores: scoreResult ? { passRate: scoreResult.passRate } : undefined,
+      });
+
+      // Write run record
+      if (this.session) {
+        const runResult = killReason.type === 'completed'
+          ? (scoreResult && scoreResult.passRate < 1.0 ? 'partial' : 'success')
+          : 'failed';
+
+        const record = createRunRecord({
+          projectId: 'crucible',
+          taskId: config.variantLabel,
+          taskType: 'feature',
+          result: runResult as 'success' | 'partial' | 'failed',
+          summary: `Docker CLI run ${runId}: ${killReason.type}, ${totalTokens} tokens, $${cliResult.totalCostUsd.toFixed(4)}, ${result.wallTimeMs}ms`,
+          filesTouched: cliResult.writtenFiles,
+        });
+
+        try {
+          await this.session.runRecords.append(record);
+        } catch {
+          // Non-fatal
+        }
+      }
+
+      await tracer.close(killReason, totalTokens);
+      await runner.destroy();
+
+      return result;
+
+    } catch (err) {
+      this.activeRuns.delete(runId);
+      this.emitRunEvent(runId, 'error', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+
+      if (runner) {
+        await runner.destroy();
+      }
+
+      const completedAt = new Date();
+      const killReason: KillReason = { type: 'completed' };
+      const result: RunResult = {
+        runId,
+        variantLabel: config.variantLabel,
+        exitReason: killReason,
+        tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+        wallTimeMs: completedAt.getTime() - startedAt.getTime(),
+        startedAt: startedAt.toISOString(),
+        completedAt: completedAt.toISOString(),
+        artifacts: { outputDir: '', files: [] },
+        metadata: { error: err instanceof Error ? err.message : String(err) },
+      };
+
+      this.emitRunEvent(runId, 'run_completed', {
+        exitReason: killReason,
+        tokenCount: 0,
+        wallTimeMs: result.wallTimeMs,
+        error: err instanceof Error ? err.message : String(err),
+      });
+
+      return result;
+    }
+  }
+
+  /**
+   * CLI-based run: spawns `claude -p` with subscription auth.
+   *
+   * Instead of E2B sandbox + Anthropic API, this:
+   *   1. Creates a temp directory and seeds it with task files
+   *   2. Spawns `claude -p --output-format stream-json` pointed at that dir
+   *   3. Parses the stream-json events and maps them to CRUCIBLE RunEvents
+   *   4. Collects artifacts from the temp dir after completion
+   *
+   * No ANTHROPIC_API_KEY needed — uses Claude Code subscription (Max plan).
+   */
+  private async startCliRun(
+    runId: string,
+    config: RunConfig,
+    agentConfig: Record<string, unknown> | undefined,
+    startedAt: Date,
+    tracer: RunTracer,
+  ): Promise<RunResult> {
+    // Create a temp working directory and seed it with task files
+    const workDir = await fs.mkdtemp(path.join(os.tmpdir(), `crucible-${runId}-`));
+    this.emitRunEvent(runId, 'cli_workdir_created', { workDir });
+
+    try {
+      // Seed files from task payload
+      if (config.taskPayload.files) {
+        for (const [filePath, content] of Object.entries(config.taskPayload.files)) {
+          const fullPath = path.join(workDir, filePath);
+          await fs.mkdir(path.dirname(fullPath), { recursive: true });
+          await fs.writeFile(fullPath, content, 'utf-8');
+        }
+      }
+
+      // Seed directory (copy tree)
+      if (config.taskPayload.seedDir) {
+        await this.copySeedDir(config.taskPayload.seedDir, workDir);
+      }
+
+      // Build system prompt with flow template
+      let systemPrompt = (agentConfig?.systemPrompt as string) ?? '';
+      if (this.session) {
+        const flowType = detectFlowType(config.taskPayload.description);
+        const flow = getFlowTemplate(flowType);
+        const flowPromptSection = this.buildFlowPromptSection(flow);
+        systemPrompt = flowPromptSection + (systemPrompt ? '\n\n' + systemPrompt : '');
+        this.emitRunEvent(runId, 'flow_detected', { flowType, phases: flow.phases.map(p => p.name) });
+      }
+
+      // Run the CLI agent
+      const cliResult = await runClaudeCliAgent({
+        task: config.taskPayload,
+        systemPrompt,
+        model: agentConfig?.model as string | undefined,
+        maxTurns: (agentConfig?.maxTurns as number | undefined) ?? 50,
+        maxBudgetUsd: agentConfig?.maxBudgetUsd as number | undefined,
+        cwd: workDir,
+        permissionMode: 'bypassPermissions',
+        allowedTools: (agentConfig?.allowedTools as string[] | undefined) ?? [
+          'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep',
+        ],
+        disallowedTools: agentConfig?.disallowedTools as string[] | undefined,
+        ttlMs: config.ttlSeconds * 1000,
+        claudeBinary: agentConfig?.claudeBinary as string | undefined,
+        extraFlags: agentConfig?.extraFlags as string[] | undefined,
+        onTurn: (turnEvent: AgentTurnEvent) => {
+          this.emitRunEvent(runId, turnEvent.type, turnEvent as unknown as Record<string, unknown>);
+        },
+      });
+
+      // Map CLI result to CRUCIBLE KillReason
+      let killReason: KillReason;
+      switch (cliResult.killReason) {
+        case 'completed':
+          killReason = { type: 'completed' };
+          this.emitRunEvent(runId, 'agent_completed', { finalMessage: cliResult.finalMessage });
+          break;
+        case 'ttl_exceeded':
+          killReason = {
+            type: 'ttl_exceeded',
+            wallTimeMs: cliResult.durationMs,
+            ttlMs: config.ttlSeconds * 1000,
+          };
+          break;
+        case 'stopped':
+          // maxTurns exceeded — map to completed with note
+          killReason = { type: 'completed' };
+          this.emitRunEvent(runId, 'agent_completed', {
+            finalMessage: `Turn limit reached. ${cliResult.finalMessage}`,
+          });
+          break;
+        case 'rate_limited':
+          killReason = { type: 'completed' };
+          this.emitRunEvent(runId, 'rate_limited', {
+            message: 'Claude Code subscription rate limit hit',
+          });
+          break;
+        case 'error':
+        default:
+          killReason = { type: 'completed' };
+          this.emitRunEvent(runId, 'error', {
+            error: cliResult.stderr || cliResult.finalMessage || 'CLI agent error',
+          });
+          break;
+      }
+
+      // Run acceptance checks against the workdir (no sandbox — run on host)
+      let scoreResult: ScoreResult | undefined;
+      if (config.taskPayload.checks && config.taskPayload.checks.length > 0 && killReason.type === 'completed') {
+        try {
+          const { execSync } = await import('node:child_process');
+          const checks = config.taskPayload.checks.map(check => {
+            try {
+              const result = execSync(check.command, {
+                cwd: workDir,
+                timeout: (check.timeout ?? 30) * 1000,
+                encoding: 'utf-8',
+                stdio: ['pipe', 'pipe', 'pipe'],
+              });
+              return {
+                name: check.name,
+                passed: true,
+                stdout: result,
+                exitCode: 0,
+              };
+            } catch (err: unknown) {
+              const execErr = err as { status?: number; stdout?: string; stderr?: string };
+              return {
+                name: check.name,
+                passed: (execErr.status ?? 1) === (check.expectedExitCode ?? 0),
+                stdout: execErr.stdout ?? '',
+                stderr: execErr.stderr ?? '',
+                exitCode: execErr.status ?? 1,
+              };
+            }
+          });
+          const passRate = checks.filter(c => c.passed).length / checks.length;
+          scoreResult = { checks, passRate };
+          this.emitRunEvent(runId, 'checks_completed', {
+            passRate,
+            checks: checks.map(c => ({ name: c.name, passed: c.passed })),
+          });
+        } catch (err) {
+          this.emitRunEvent(runId, 'checks_error', {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+
+      // Flush artifacts — copy workdir files to runs/<runId>/artifacts/
+      const artifactDir = path.join('runs', runId, 'artifacts');
+      await fs.mkdir(artifactDir, { recursive: true });
+      await this.copyDir(workDir, artifactDir);
+
+      this.activeRuns.delete(runId);
+
+      const completedAt = new Date();
+      const totalTokens = cliResult.usage.inputTokens + cliResult.usage.outputTokens;
+
+      const result: RunResult = {
+        runId,
+        variantLabel: config.variantLabel,
+        exitReason: killReason,
+        tokenUsage: {
+          promptTokens: cliResult.usage.inputTokens,
+          completionTokens: cliResult.usage.outputTokens,
+          totalTokens,
+        },
+        wallTimeMs: completedAt.getTime() - startedAt.getTime(),
+        startedAt: startedAt.toISOString(),
+        completedAt: completedAt.toISOString(),
+        artifacts: { outputDir: artifactDir, files: [] },
+        metadata: {
+          ...(scoreResult ? { scores: scoreResult } : {}),
+          cliSessionId: cliResult.sessionId,
+          totalCostUsd: cliResult.totalCostUsd,
+          numTurns: cliResult.numTurns,
+        },
+      };
+
+      this.emitRunEvent(runId, 'run_completed', {
+        exitReason: killReason,
+        tokenCount: totalTokens,
+        wallTimeMs: result.wallTimeMs,
+        totalCostUsd: cliResult.totalCostUsd,
+        scores: scoreResult ? { passRate: scoreResult.passRate } : undefined,
+      });
+
+      // Write run record
+      if (this.session) {
+        const runResult = killReason.type === 'completed'
+          ? (scoreResult && scoreResult.passRate < 1.0 ? 'partial' : 'success')
+          : 'failed';
+
+        const record = createRunRecord({
+          projectId: 'crucible',
+          taskId: config.variantLabel,
+          taskType: 'feature',
+          result: runResult as 'success' | 'partial' | 'failed',
+          summary: `CLI run ${runId}: ${killReason.type}, ${totalTokens} tokens, $${cliResult.totalCostUsd.toFixed(4)}, ${result.wallTimeMs}ms`,
+          filesTouched: cliResult.writtenFiles,
+        });
+
+        try {
+          await this.session.runRecords.append(record);
+        } catch {
+          // Non-fatal
+        }
+      }
+
+      // Cleanup temp dir
+      await tracer.close(killReason, totalTokens);
+      await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
+
+      return result;
+
+    } catch (err) {
+      this.activeRuns.delete(runId);
+      this.emitRunEvent(runId, 'error', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
+
+      const completedAt = new Date();
+      const killReason: KillReason = { type: 'completed' };
+      const result: RunResult = {
+        runId,
+        variantLabel: config.variantLabel,
+        exitReason: killReason,
+        tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+        wallTimeMs: completedAt.getTime() - startedAt.getTime(),
+        startedAt: startedAt.toISOString(),
+        completedAt: completedAt.toISOString(),
+        artifacts: { outputDir: '', files: [] },
+        metadata: { error: err instanceof Error ? err.message : String(err) },
+      };
+
+      this.emitRunEvent(runId, 'run_completed', {
+        exitReason: killReason,
+        tokenCount: 0,
+        wallTimeMs: result.wallTimeMs,
+        error: err instanceof Error ? err.message : String(err),
+      });
+
+      return result;
+    }
+  }
+
+  /** Copy a local directory tree to a destination, skipping heavy dirs. */
+  private async copySeedDir(srcDir: string, destDir: string): Promise<void> {
+    const SKIP = new Set(['node_modules', '.git', 'dist', '.next', '__pycache__', '.venv', 'venv', '.cache']);
+    const entries = await fs.readdir(srcDir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (SKIP.has(entry.name)) continue;
+
+      const srcPath = path.join(srcDir, entry.name);
+      const destPath = path.join(destDir, entry.name);
+
+      if (entry.isDirectory()) {
+        await fs.mkdir(destPath, { recursive: true });
+        await this.copySeedDir(srcPath, destPath);
+      } else if (entry.isFile()) {
+        await fs.copyFile(srcPath, destPath);
+      }
+    }
+  }
+
+  /** Copy all files from src to dest. */
+  private async copyDir(srcDir: string, destDir: string): Promise<void> {
+    const entries = await fs.readdir(srcDir, { withFileTypes: true });
+    for (const entry of entries) {
+      const srcPath = path.join(srcDir, entry.name);
+      const destPath = path.join(destDir, entry.name);
+      if (entry.isDirectory()) {
+        await fs.mkdir(destPath, { recursive: true });
+        await this.copyDir(srcPath, destPath);
+      } else if (entry.isFile()) {
+        await fs.copyFile(srcPath, destPath);
+      }
+    }
   }
 
   /** Build a system prompt section from a flow template. */

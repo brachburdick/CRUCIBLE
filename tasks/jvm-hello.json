@@ -1,0 +1,22 @@
+{
+  "description": "Write a Java hello-world program",
+  "instructions": "Create a Java file called Hello.java with a main method that prints 'Hello from Java!'. Compile and run it.",
+  "runtime": "jvm",
+  "checks": [
+    {
+      "name": "Hello.java exists",
+      "type": "exec",
+      "command": "test -f /workspace/Hello.java"
+    },
+    {
+      "name": "compiles with javac",
+      "type": "exec",
+      "command": "cd /workspace && javac Hello.java"
+    },
+    {
+      "name": "outputs correct greeting",
+      "type": "exec",
+      "command": "cd /workspace && java Hello | grep -q 'Hello from Java!'"
+    }
+  ]
+}

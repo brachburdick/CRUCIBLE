@@ -1,0 +1,26 @@
+{
+  "description": "Write a Python script that reads requirements.txt and lists installed packages",
+  "instructions": "Create a file called check_deps.py that reads requirements.txt, installs the packages using pip, then prints each package name and its installed version. Use importlib.metadata to get versions. Print one line per package in the format: 'package==version'.",
+  "files": {
+    "requirements.txt": "requests==2.31.0\n",
+    "README.md": "# Dependency Checker\n\nInstall deps from requirements.txt and verify they are available.\n"
+  },
+  "checks": [
+    {
+      "name": "check_deps.py exists",
+      "type": "exec",
+      "command": "test -f /workspace/check_deps.py"
+    },
+    {
+      "name": "requirements.txt is present",
+      "type": "exec",
+      "command": "test -f /workspace/requirements.txt"
+    },
+    {
+      "name": "script runs without error",
+      "type": "exec",
+      "command": "cd /workspace && pip install -q -r requirements.txt && python3 check_deps.py",
+      "timeout": 60
+    }
+  ]
+}

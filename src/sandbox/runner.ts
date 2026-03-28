@@ -62,7 +62,74 @@ export class SandboxRunner {
       }
     }
 
+    // Upload seedDir contents to sandbox if specified
+    if (config.taskPayload.seedDir) {
+      await SandboxRunner.uploadSeedDir(sandbox, config.taskPayload.seedDir);
+    }
+
     return new SandboxRunner(sandbox);
+  }
+
+  /**
+   * Upload a local directory tree to the sandbox.
+   * Skips common heavy/irrelevant directories (node_modules, .git, dist, etc.).
+   * Files are uploaded relative to SANDBOX_WORKDIR.
+   */
+  private static async uploadSeedDir(sandbox: Sandbox, seedDirPath: string): Promise<void> {
+    const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', '.next', '__pycache__', '.venv', 'venv', '.cache', 'runs', 'data']);
+    const MAX_FILE_SIZE = 512 * 1024; // 512KB — skip large binary files
+
+    async function walkDir(dirPath: string, relativeTo: string): Promise<Array<{ relative: string; absolute: string }>> {
+      const results: Array<{ relative: string; absolute: string }> = [];
+      let entries;
+      try {
+        entries = await fs.readdir(dirPath, { withFileTypes: true });
+      } catch {
+        return results;
+      }
+
+      for (const entry of entries) {
+        if (SKIP_DIRS.has(entry.name)) continue;
+        if (entry.name.startsWith('.') && entry.name !== '.env.example') continue;
+
+        const fullPath = path.join(dirPath, entry.name);
+        const relPath = path.relative(relativeTo, fullPath);
+
+        if (entry.isDirectory()) {
+          const children = await walkDir(fullPath, relativeTo);
+          results.push(...children);
+        } else if (entry.isFile()) {
+          try {
+            const stat = await fs.stat(fullPath);
+            if (stat.size <= MAX_FILE_SIZE) {
+              results.push({ relative: relPath, absolute: fullPath });
+            }
+          } catch {
+            // Skip files we can't stat
+          }
+        }
+      }
+      return results;
+    }
+
+    const files = await walkDir(seedDirPath, seedDirPath);
+
+    // Upload in batches of 10 for concurrency control
+    const BATCH_SIZE = 10;
+    for (let i = 0; i < files.length; i += BATCH_SIZE) {
+      const batch = files.slice(i, i + BATCH_SIZE);
+      await Promise.all(
+        batch.map(async (file) => {
+          try {
+            const content = await fs.readFile(file.absolute, 'utf-8');
+            const sandboxPath = `${SANDBOX_WORKDIR}/${file.relative}`;
+            await sandbox.files.write(sandboxPath, content);
+          } catch {
+            // Skip files that can't be read as UTF-8 (binary files)
+          }
+        })
+      );
+    }
   }
 
   /**

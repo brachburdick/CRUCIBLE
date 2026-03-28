@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 
+import dotenv from 'dotenv';
+dotenv.config({ override: true });
 import { Command } from 'commander';
 import { RunEngine } from '../engine/RunEngine.js';
 import { SessionModel } from '../session/index.js';
-import { openDatabase } from './db.js';
+import { openDatabase, cleanupStaleRuns } from './db.js';
 import { createServer } from './index.js';
 
 async function main(): Promise<void> {
@@ -21,6 +23,12 @@ async function main(): Promise<void> {
 
   const engine = new RunEngine();
   const db = openDatabase();
+
+  // Clean up runs left in "running" state from a previous server session
+  const staleCount = cleanupStaleRuns(db);
+  if (staleCount > 0) {
+    console.log(`Cleaned up ${staleCount} stale run(s) from previous session`);
+  }
 
   // Initialize session model for API routes
   const session = new SessionModel({ agentDir: opts.agentDir });

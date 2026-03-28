@@ -5,6 +5,7 @@ import type {
   ToolDefinition,
   ToolCall,
   ContentBlock,
+  OnTurnCallback,
 } from '../types/index.js';
 
 const DEFAULT_MAX_TURNS = 50;
@@ -17,6 +18,8 @@ export interface CoderAgentConfig {
   model?: string;
   /** Maximum agentic loop turns before forced stop */
   maxTurns?: number;
+  /** Optional callback for per-turn visibility (thinking, tool calls, results) */
+  onTurn?: OnTurnCallback;
 }
 
 /** Default system prompt when no variant config is provided */
@@ -131,10 +134,15 @@ async function executeTool(
  * The system prompt is the variant-specific parameterization point — different
  * variants produce different agent behaviors by changing the instructions.
  */
+function truncate(s: string, maxLen = 2000): string {
+  return s.length > maxLen ? s.slice(0, maxLen) + '…' : s;
+}
+
 export function createCoderAgent(task: TaskPayload, config?: CoderAgentConfig): AgentFn {
   const systemPrompt = config?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
   const maxTurns = config?.maxTurns ?? DEFAULT_MAX_TURNS;
   const model = config?.model;
+  const onTurn = config?.onTurn;
 
   return async (llmCall, tools) => {
     const messages: LlmMessage[] = [
@@ -147,15 +155,29 @@ export function createCoderAgent(task: TaskPayload, config?: CoderAgentConfig): 
 
     const writtenFiles: string[] = [];
 
+    let cumulativeTokens = 0;
+
     for (let turn = 0; turn < maxTurns; turn++) {
       const response = await llmCall(messages, {
         tools: CODER_TOOLS,
         model,
       });
 
+      cumulativeTokens += response.usage.promptTokens + response.usage.completionTokens;
+
+      // Emit agent thinking event
+      onTurn?.({
+        type: 'agent_thinking',
+        turn,
+        content: truncate(response.content),
+        usage: response.usage,
+      });
+
       // If the model returned text only (no tool calls), add it and check if done
       if (!response.toolCalls || response.toolCalls.length === 0) {
         messages.push({ role: 'assistant', content: response.content });
+
+        onTurn?.({ type: 'agent_turn_complete', turn, cumulativeTokens });
 
         // If stop reason is end_turn with no tools, the model is done talking
         if (response.stopReason === 'end_turn') {
@@ -191,6 +213,17 @@ export function createCoderAgent(task: TaskPayload, config?: CoderAgentConfig): 
       let completionSummary = '';
 
       for (const tc of response.toolCalls) {
+        // Emit tool call event
+        onTurn?.({
+          type: 'agent_tool_call',
+          turn,
+          toolCallId: tc.id,
+          toolName: tc.name,
+          toolInput: tc.name === 'write_file'
+            ? { path: tc.input['path'] }  // Don't send full file content in events
+            : tc.input,
+        });
+
         if (tc.name === 'task_complete') {
           taskCompleted = true;
           completionSummary = (tc.input['summary'] as string) ?? 'Task completed';
@@ -199,10 +232,29 @@ export function createCoderAgent(task: TaskPayload, config?: CoderAgentConfig): 
             tool_use_id: tc.id,
             content: `Task complete: ${completionSummary}`,
           });
+
+          onTurn?.({
+            type: 'agent_tool_result',
+            turn,
+            toolCallId: tc.id,
+            toolName: tc.name,
+            content: truncate(completionSummary),
+            isError: false,
+          });
           continue;
         }
 
         const result = await executeTool(tc, tools);
+
+        onTurn?.({
+          type: 'agent_tool_result',
+          turn,
+          toolCallId: tc.id,
+          toolName: tc.name,
+          content: truncate(result.content),
+          isError: result.isError,
+        });
+
         toolResultBlocks.push({
           type: 'tool_result',
           tool_use_id: tc.id,
@@ -217,6 +269,8 @@ export function createCoderAgent(task: TaskPayload, config?: CoderAgentConfig): 
 
       // Add tool results as user message
       messages.push({ role: 'user', content: toolResultBlocks });
+
+      onTurn?.({ type: 'agent_turn_complete', turn, cumulativeTokens });
 
       if (taskCompleted) {
         return {

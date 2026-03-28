@@ -1,0 +1,20 @@
+FROM crucible-runner:base
+
+# OpenJDK 17 + Maven + Gradle
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openjdk-17-jdk-headless \
+    maven \
+    unzip \
+  && rm -rf /var/lib/apt/lists/*
+
+# Gradle (not in Debian repos — install manually)
+ARG GRADLE_VERSION=8.7
+RUN curl -fsSL "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
+    -o /tmp/gradle.zip \
+  && unzip -q /tmp/gradle.zip -d /opt \
+  && rm /tmp/gradle.zip \
+  && ln -s "/opt/gradle-${GRADLE_VERSION}/bin/gradle" /usr/local/bin/gradle
+
+# Set JAVA_HOME dynamically — path differs by architecture (amd64 vs arm64)
+RUN ln -s /usr/lib/jvm/java-17-openjdk-* /usr/lib/jvm/java-17-openjdk
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk

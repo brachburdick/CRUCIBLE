@@ -11,6 +11,9 @@ export interface RunConfig {
   };
 }
 
+/** Supported runtime ecosystems for pre-built Docker images */
+export type RuntimeEcosystem = 'node' | 'python' | 'rust' | 'go' | 'ruby' | 'jvm';
+
 /** Task payload read from file */
 export interface TaskPayload {
   description: string;
@@ -23,6 +26,10 @@ export interface TaskPayload {
   networkAllowlist?: string[];
   /** Acceptance checks to run after the agent completes */
   checks?: CheckSpec[];
+  /** Runtime ecosystem — maps to crucible-runner:<runtime> image */
+  runtime?: RuntimeEcosystem;
+  /** Full Docker image override (takes precedence over runtime) */
+  image?: string;
 }
 
 /** Discriminated union for why a run ended */
@@ -211,6 +218,17 @@ export interface ScoreResult {
   passRate: number;
 }
 
+// ─── Agent turn event types (for per-turn visibility) ───
+
+export type AgentTurnEvent =
+  | { type: 'agent_thinking'; turn: number; content: string; usage: { promptTokens: number; completionTokens: number } }
+  | { type: 'agent_tool_call'; turn: number; toolCallId: string; toolName: string; toolInput: Record<string, unknown> }
+  | { type: 'agent_tool_result'; turn: number; toolCallId: string; toolName: string; content: string; isError: boolean }
+  | { type: 'agent_turn_complete'; turn: number; cumulativeTokens: number };
+
+/** Callback for agent turn events — passed to agent config for per-turn visibility */
+export type OnTurnCallback = (event: AgentTurnEvent) => void;
+
 // ─── Error types ───
 
 export class BudgetExceededError extends Error {
@@ -231,5 +249,12 @@ export class LoopDetectedError extends Error {
   ) {
     super(`Semantic loop detected: similarity ${similarityScore} for ${consecutiveCount} consecutive turns`);
     this.name = 'LoopDetectedError';
+  }
+}
+
+export class DockerNotAvailableError extends Error {
+  constructor() {
+    super('Docker is not available. Install Docker Desktop or ensure the Docker daemon is running.');
+    this.name = 'DockerNotAvailableError';
   }
 }

@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "crucible-ui",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "--port", "5176"],
+      "cwd": "/Users/brach/Documents/THE_FACTORY/projects/CRUCIBLE/ui",
+      "port": 5176
+    }
+  ]
+}

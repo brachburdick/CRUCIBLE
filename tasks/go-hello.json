@@ -1,0 +1,22 @@
+{
+  "description": "Write a Go hello-world program",
+  "instructions": "Create a Go program in main.go that prints 'Hello from Go!'. Initialize a module with go mod init hello, then build and run it.",
+  "runtime": "go",
+  "checks": [
+    {
+      "name": "main.go exists",
+      "type": "exec",
+      "command": "test -f /workspace/main.go"
+    },
+    {
+      "name": "builds with go build",
+      "type": "exec",
+      "command": "cd /workspace && go build -o hello main.go"
+    },
+    {
+      "name": "outputs correct greeting",
+      "type": "exec",
+      "command": "cd /workspace && ./hello | grep -q 'Hello from Go!'"
+    }
+  ]
+}

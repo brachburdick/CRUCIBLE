@@ -1,0 +1,25 @@
+{
+  "description": "Write a Python fibonacci script that prints fib(10)",
+  "instructions": "Create a file called /workspace/fibonacci.py that contains a function fib(n) which returns the n-th Fibonacci number (0-indexed: fib(0)=0, fib(1)=1, fib(2)=1, fib(3)=2, ...). At the end of the script, print the result of fib(10). The expected output is 55. IMPORTANT: Write the file to /workspace/fibonacci.py — that is your working directory.",
+  "runtime": "python",
+  "files": {
+    "README.md": "# Fibonacci\n\nWrite fibonacci.py that prints fib(10).\nExpected output: 55\n"
+  },
+  "checks": [
+    {
+      "name": "fibonacci.py exists",
+      "type": "exec",
+      "command": "test -f /workspace/fibonacci.py || test -f /tmp/fibonacci.py"
+    },
+    {
+      "name": "fib(10) outputs 55",
+      "type": "exec",
+      "command": "FIB=$(find /workspace /tmp /repo -name fibonacci.py -type f 2>/dev/null | head -1) && python3 \"$FIB\" | grep -q 55"
+    },
+    {
+      "name": "fib function is correct for edge cases",
+      "type": "exec",
+      "command": "FIB=$(find /workspace /tmp /repo -name fibonacci.py -type f 2>/dev/null | head -1) && DIR=$(dirname \"$FIB\") && cd \"$DIR\" && python3 -c \"from fibonacci import fib; assert fib(0) == 0; assert fib(1) == 1; assert fib(5) == 5; print('OK')\""
+    }
+  ]
+}

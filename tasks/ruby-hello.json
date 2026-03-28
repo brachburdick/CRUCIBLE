@@ -1,0 +1,17 @@
+{
+  "description": "Write a Ruby hello-world script",
+  "instructions": "Create a Ruby script called hello.rb that prints 'Hello from Ruby!'.",
+  "runtime": "ruby",
+  "checks": [
+    {
+      "name": "hello.rb exists",
+      "type": "exec",
+      "command": "test -f /workspace/hello.rb"
+    },
+    {
+      "name": "outputs correct greeting",
+      "type": "exec",
+      "command": "cd /workspace && ruby hello.rb | grep -q 'Hello from Ruby!'"
+    }
+  ]
+}

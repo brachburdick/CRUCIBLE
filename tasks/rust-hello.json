@@ -1,0 +1,22 @@
+{
+  "description": "Write a Rust hello-world program",
+  "instructions": "Create a Rust file called main.rs with a main function that prints 'Hello from Rust!'. Compile it with rustc and run the resulting binary.",
+  "runtime": "rust",
+  "checks": [
+    {
+      "name": "main.rs exists",
+      "type": "exec",
+      "command": "test -f /workspace/main.rs"
+    },
+    {
+      "name": "compiles with rustc",
+      "type": "exec",
+      "command": "cd /workspace && rustc main.rs -o hello"
+    },
+    {
+      "name": "outputs correct greeting",
+      "type": "exec",
+      "command": "cd /workspace && ./hello | grep -q 'Hello from Rust!'"
+    }
+  ]
+}

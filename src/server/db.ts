@@ -146,3 +146,12 @@ export function getRun(db: Database.Database, id: string): RunRow | undefined {
 export function getRunEvents(db: Database.Database, runId: string): RunEventRow[] {
   return db.prepare('SELECT * FROM run_events WHERE run_id = ? ORDER BY id ASC').all(runId) as RunEventRow[];
 }
+
+export function cleanupStaleRuns(db: Database.Database): number {
+  const now = new Date().toISOString();
+  const result = db.prepare(`
+    UPDATE runs SET status = 'failed', exit_reason = '{"type":"server_restart"}', completed_at = ?
+    WHERE status = 'running'
+  `).run(now);
+  return result.changes;
+}
