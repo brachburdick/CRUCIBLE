@@ -16,6 +16,7 @@ interface RunRow {
   wall_time_ms: number | null
   budget: number
   started_at: string
+  applied_at: string | null
 }
 
 export default function Dashboard() {
@@ -101,7 +102,16 @@ export default function Dashboard() {
                     </td>
                     <td className="px-4 py-3 text-slate-300">{run.agent}</td>
                     <td className="px-4 py-3 text-slate-300">{run.variant}</td>
-                    <td className="px-4 py-3"><RunStatusBadge status={run.status} /></td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5">
+                        <RunStatusBadge status={run.status} />
+                        {run.applied_at && (
+                          <span className="inline-flex items-center text-[10px] font-medium text-emerald-400 bg-emerald-950/50 border border-emerald-800/50 rounded px-1.5 py-0.5 uppercase tracking-wider">
+                            applied
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-4 py-3 text-right font-mono text-slate-400">
                       {run.token_count.toLocaleString()}/{run.budget.toLocaleString()}
                     </td>

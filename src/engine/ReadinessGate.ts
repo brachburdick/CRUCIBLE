@@ -8,6 +8,8 @@
 import type { TaskPayload } from '../types/index.js';
 import type { DecompositionNode, ReadinessAssessment, ReadinessCheck, QuestionRef } from '../types/graph.js';
 import { emptyReadiness } from '../types/graph.js';
+import { baseLlmCall } from './llm.js';
+import type { DeepCheck } from './StrategySelector.js';
 
 export interface ReadinessGateConfig {
   gateMode: 'hard-block' | 'triage';
@@ -62,6 +64,95 @@ export class ReadinessGate {
     return this.buildAssessment(checks);
   }
 
+  /**
+   * Deep analysis — batched LLM call to estimate 4 heuristics.
+   * Returns DeepCheck[] with levels assigned by thresholds.
+   * Gracefully returns [] on any failure.
+   */
+  async assessDeep(task: TaskPayload): Promise<DeepCheck[]> {
+    const prompt = `You are a task scope estimator for a software engineering agent harness. Analyze this task and estimate 4 heuristics. Be conservative — overestimate complexity rather than underestimate.
+
+Task description: ${task.description}
+Instructions: ${task.instructions ?? 'none'}
+Files: ${task.files ? Object.keys(task.files).join(', ') : 'none specified'}
+Seed directory: ${task.seedDir ?? 'none'}
+
+Respond with ONLY a JSON object (no markdown, no commentary):
+{
+  "estimated_duration_minutes": <number>,
+  "file_count": <number>,
+  "change_entropy_modules": <number>,
+  "architectural_scope": "localized" | "architectural"
+}
+
+estimated_duration_minutes: How long would a senior engineer take? (in minutes)
+file_count: How many files will likely be modified?
+change_entropy_modules: How many distinct modules/directories are touched?
+architectural_scope: "localized" if changes stay within one module boundary, "architectural" if they cross module boundaries or change interfaces.`;
+
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+
+      const response = await baseLlmCall(
+        [{ role: 'user', content: prompt }],
+        { maxTokens: 500, temperature: 0.1 },
+      );
+
+      clearTimeout(timeout);
+
+      const parsed = JSON.parse(response.content) as {
+        estimated_duration_minutes?: number;
+        file_count?: number;
+        change_entropy_modules?: number;
+        architectural_scope?: string;
+      };
+
+      return this.buildDeepChecks(parsed);
+    } catch {
+      return [];
+    }
+  }
+
+  private buildDeepChecks(parsed: {
+    estimated_duration_minutes?: number;
+    file_count?: number;
+    change_entropy_modules?: number;
+    architectural_scope?: string;
+  }): DeepCheck[] {
+    const durationMin = parsed.estimated_duration_minutes ?? 0;
+    const files = parsed.file_count ?? 0;
+    const entropy = parsed.change_entropy_modules ?? 0;
+    const scope = parsed.architectural_scope ?? 'localized';
+
+    return [
+      {
+        heuristic: 'estimated_duration',
+        value: durationMin,
+        level: durationMin < 30 ? 'green' : durationMin <= 240 ? 'amber' : 'red',
+        detail: durationMin < 60 ? `~${durationMin} min` : `~${(durationMin / 60).toFixed(1)} hr`,
+      },
+      {
+        heuristic: 'file_count',
+        value: files,
+        level: files <= 3 ? 'green' : files <= 10 ? 'amber' : 'red',
+        detail: `~${files} files`,
+      },
+      {
+        heuristic: 'change_entropy',
+        value: entropy,
+        level: entropy <= 1 ? 'green' : entropy <= 2 ? 'amber' : 'red',
+        detail: `${entropy} module${entropy !== 1 ? 's' : ''}`,
+      },
+      {
+        heuristic: 'architectural_scope',
+        value: scope,
+        level: scope === 'localized' ? 'green' : 'amber',
+        detail: scope === 'localized' ? 'Localized change' : 'Architectural — crosses module boundaries',
+      },
+    ];
+  }
+
   private runGlobalChecks(task: TaskPayload): ReadinessCheck[] {
     return [
       this.checkAcceptanceCriteria(task),
@@ -80,7 +171,7 @@ export class ReadinessGate {
     return {
       rule: 'has_acceptance_criteria',
       source: 'global',
-      binding: 'hard',
+      binding: 'required',
       passed: !!(hasChecks || hasMeasurableOutcomes),
       detail: hasChecks
         ? `${task.checks!.length} acceptance check(s) defined`
@@ -100,7 +191,7 @@ export class ReadinessGate {
     return {
       rule: 'has_scope_boundary',
       source: 'global',
-      binding: 'hard',
+      binding: 'required',
       passed: !!(hasFiles || hasSeedDir || instructionsReferenceFiles),
       detail: hasFiles
         ? `files specified: ${Object.keys(task.files!).join(', ')}`
@@ -121,7 +212,7 @@ export class ReadinessGate {
     return {
       rule: 'has_verification_command',
       source: 'global',
-      binding: 'hard',
+      binding: 'required',
       passed: !!(hasChecks || hasTestCommand),
       detail: hasChecks
         ? `${task.checks!.length} exec check(s) defined`
@@ -138,7 +229,7 @@ export class ReadinessGate {
     return {
       rule: 'dependencies_resolved',
       source: 'global',
-      binding: 'hard',
+      binding: 'waivable',
       passed: true,
       detail: 'No declared dependencies (standalone task)',
     };
@@ -183,7 +274,7 @@ export class ReadinessGate {
     return {
       rule: 'risk_classified',
       source: 'global',
-      binding: 'hard',
+      binding: 'waivable',
       passed: classified,
       detail: classified
         ? `Risk inferred: ${bugfix ? 'bugfix (low)' : feature ? 'feature (medium)' : 'refactor (low-medium)'}`
@@ -197,16 +288,18 @@ export class ReadinessGate {
     assessment.globalWeight = this.config.globalWeight;
     assessment.checks = checks;
 
-    // Compute global score: proportion of passed checks (hard checks weighted more)
-    const hardChecks = checks.filter(c => c.binding === 'hard');
+    // Compute global score: proportion of passed checks (required/waivable weighted more)
+    const requiredChecks = checks.filter(c => c.binding === 'required');
+    const waivableChecks = checks.filter(c => c.binding === 'waivable');
     const advisoryChecks = checks.filter(c => c.binding === 'advisory');
 
-    const hardPassed = hardChecks.filter(c => c.passed).length;
+    const requiredPassed = requiredChecks.filter(c => c.passed).length;
+    const waivablePassed = waivableChecks.filter(c => c.passed).length;
     const advisoryPassed = advisoryChecks.filter(c => c.passed).length;
 
-    // Hard checks are worth 1.0 each, advisory worth 0.5
-    const totalWeight = hardChecks.length + advisoryChecks.length * 0.5;
-    const passedWeight = hardPassed + advisoryPassed * 0.5;
+    // Required checks worth 1.0, waivable 0.75, advisory 0.5
+    const totalWeight = requiredChecks.length + waivableChecks.length * 0.75 + advisoryChecks.length * 0.5;
+    const passedWeight = requiredPassed + waivablePassed * 0.75 + advisoryPassed * 0.5;
     assessment.globalScore = totalWeight > 0 ? passedWeight / totalWeight : 1.0;
 
     // dynamicScore is 1.0 in Phase 1 (no dynamic gate configured)
@@ -218,10 +311,10 @@ export class ReadinessGate {
       (1 - assessment.globalWeight) * assessment.dynamicScore;
 
     // Check pass condition
-    const allHardPassed = hardChecks.every(c => c.passed);
+    const allRequiredPassed = requiredChecks.every(c => c.passed);
 
     if (this.config.gateMode === 'hard-block') {
-      if (allHardPassed && assessment.compositeScore >= this.config.readinessThreshold) {
+      if (allRequiredPassed && assessment.compositeScore >= this.config.readinessThreshold) {
         assessment.passedAt = new Date().toISOString();
       }
     } else {

@@ -70,11 +70,17 @@ export function registerRunRoutes(app: FastifyInstance, engine: RunEngine, db: D
       instructions?: string;
       seedDir?: string;
       systemPrompt?: string;
+      // Gate metadata (Phase 7A)
+      strategy?: string;
+      gateBypass?: boolean;
+      gateSummary?: Record<string, unknown>;
+      waivers?: Array<{ rule: string; justification: string; timestamp: string }>;
     };
   }>('/api/runs', async (request, reply) => {
     const {
       taskFile, agent = 'coder', variant = 'default', budget, ttl,
       projectName, description, instructions, seedDir, systemPrompt,
+      strategy, gateBypass, gateSummary, waivers,
     } = request.body;
 
     // Read and validate task payload — either from file or inline project task
@@ -138,12 +144,20 @@ export function registerRunRoutes(app: FastifyInstance, engine: RunEngine, db: D
       // On run_started: insert the run row FIRST, then persist the event
       if (event.event === 'run_started' && !capturedRunId) {
         capturedRunId = event.runId;
+        // Include gate metadata in task JSON if present
+        const taskJsonData = {
+          ...taskPayload,
+          ...(strategy && { strategy }),
+          ...(gateBypass !== undefined && { gateBypass }),
+          ...(gateSummary && { gateSummary }),
+          ...(waivers && waivers.length > 0 && { waivers }),
+        };
         insertRun(db, {
           id: event.runId,
           agent,
           variant,
           taskFile: taskFile ?? `project:${projectName ?? 'inline'}`,
-          taskJson: JSON.stringify(taskPayload),
+          taskJson: JSON.stringify(taskJsonData),
           budget: tokenBudget,
           ttlSeconds,
           startedAt: event.timestamp,

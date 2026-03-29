@@ -6,6 +6,9 @@ import RunStatusBadge from '../components/RunStatusBadge'
 import TokenProgressBar from '../components/TokenProgressBar'
 import EventFeed from '../components/EventFeed'
 import NavBar from '../components/NavBar'
+import DiffSummary from '../components/DiffSummary'
+import DiffViewer from '../components/DiffViewer'
+import ApplyButton from '../components/ApplyButton'
 
 interface RunDetail {
   id: string
@@ -21,6 +24,8 @@ interface RunDetail {
   exit_reason: string | null
   started_at: string
   completed_at: string | null
+  applied_at: string | null
+  applied_mode: string | null
   events: Array<{
     event: string
     data: string
@@ -28,9 +33,23 @@ interface RunDetail {
   }>
 }
 
+interface DiffData {
+  patch: string
+  stats: {
+    filesChanged: number
+    insertions: number
+    deletions: number
+    files: Array<{ path: string; insertions: number; deletions: number; status: string }>
+  }
+  applied: boolean
+  appliedAt: string | null
+  appliedMode: string | null
+}
+
 export default function RunDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { data: run, refetch } = useFetch<RunDetail>(`/api/runs/${id}`, [id])
+  const { data: diffData, refetch: refetchDiff } = useFetch<DiffData>(`/api/runs/${id}/diff`, [id])
   const { messages, subscribe } = useWebSocket()
 
   // Subscribe to this run's events
@@ -107,7 +126,14 @@ export default function RunDetailPage() {
             <p className="text-sm text-slate-500">{run.variant} / {run.agent}</p>
           </div>
         </div>
-        <RunStatusBadge status={run.status} />
+        <div className="flex items-center gap-2">
+          <RunStatusBadge status={run.status} />
+          {run.applied_at && (
+            <span className="inline-flex items-center text-[10px] font-medium text-emerald-400 bg-emerald-950/50 border border-emerald-800/50 rounded px-1.5 py-0.5 uppercase tracking-wider">
+              applied
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="max-w-5xl mx-auto px-6 py-6 space-y-6">
@@ -156,6 +182,28 @@ export default function RunDetailPage() {
                 </span>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Changes (Phase 8A) — visible for completed runs with a diff */}
+        {run.status === 'completed' && diffData && (
+          <div className="bg-slate-900 border border-slate-800 rounded-lg p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-slate-300">Changes</h2>
+              <ApplyButton
+                runId={run.id}
+                applied={!!run.applied_at || diffData.applied}
+                appliedMode={run.applied_mode ?? diffData.appliedMode}
+                onApplied={() => { refetch(); refetchDiff(); }}
+              />
+            </div>
+            <DiffSummary
+              filesChanged={diffData.stats.filesChanged}
+              insertions={diffData.stats.insertions}
+              deletions={diffData.stats.deletions}
+              files={diffData.stats.files}
+            />
+            <DiffViewer patch={diffData.patch} />
           </div>
         )}
 

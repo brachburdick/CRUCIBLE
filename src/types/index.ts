@@ -53,6 +53,21 @@ export interface RunResult {
   startedAt: string;   // ISO 8601
   completedAt: string; // ISO 8601
   artifacts: ArtifactManifest;
+  /** Diff between seed files and artifacts (Phase 8A) */
+  diff?: {
+    patchPath: string;
+    stats: {
+      filesChanged: number;
+      insertions: number;
+      deletions: number;
+      files?: Array<{
+        path: string;
+        insertions: number;
+        deletions: number;
+        status: 'modified' | 'added' | 'deleted';
+      }>;
+    };
+  };
   /** Reserved for Phase 2 scoring metadata */
   metadata?: Record<string, unknown>;
 }

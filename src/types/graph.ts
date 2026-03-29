@@ -69,7 +69,7 @@ export interface ReadinessAssessment {
 export interface ReadinessCheck {
   rule: string;
   source: 'global' | 'dynamic';
-  binding: 'hard' | 'advisory';
+  binding: 'required' | 'waivable' | 'advisory';
   passed: boolean;
   detail: string;
 }

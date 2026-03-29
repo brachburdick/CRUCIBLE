@@ -13,6 +13,8 @@ import { registerWsRoutes } from './routes/ws.js';
 import { registerSessionRoutes } from './routes/session.js';
 import { registerGraphRoutes } from './routes/graphs.js';
 import { registerProjectRoutes } from './routes/projects.js';
+import { registerReadinessRoutes } from './routes/readiness.js';
+import { registerArtifactRoutes } from './routes/artifacts.js';
 
 export interface ServerOptions {
   port: number;
@@ -37,6 +39,8 @@ export async function createServer(opts: ServerOptions) {
     registerSessionRoutes(app, opts.session);
   }
   registerGraphRoutes(app, new GraphStore('runs'));
+  registerReadinessRoutes(app);
+  registerArtifactRoutes(app, opts.db);
 
   // Cross-project routes — aggregates tasks/questions from all projects
   const projectsDir = path.resolve('..'); // CRUCIBLE lives in projects/, so .. = all sibling projects

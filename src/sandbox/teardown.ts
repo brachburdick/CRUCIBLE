@@ -112,6 +112,11 @@ export async function teardown(
     });
   }
 
+  // ── Step 2b: Diff generation skipped for E2B path ──────────────────────────
+  // E2B sandbox doesn't have git infrastructure. E2B runs are typically
+  // evaluated, not applied. Diff generation is handled by the CLI/Docker paths
+  // which init a git repo in the workdir at seed time.
+
   // ── Step 3: Close Langfuse trace and flush ────────────────────────────────
   try {
     await tracer.close(killReason, tokenCount);
@@ -156,6 +161,7 @@ export async function teardown(
       startedAt: startedAt.toISOString(),
       completedAt: completedAt.toISOString(),
       artifacts: artifactManifest,
+      // E2B path: no diff generation (no git in sandbox)
     };
 
     const resultPath = path.join(runDir, 'result.json');

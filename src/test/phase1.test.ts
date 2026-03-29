@@ -40,9 +40,9 @@ describe('ReadinessGate', () => {
     assert.ok(assessment.compositeScore >= 0.8, `Composite score ${assessment.compositeScore} should be >= 0.8`);
 
     // All hard checks should pass
-    const hardChecks = assessment.checks.filter(c => c.binding === 'hard');
-    for (const check of hardChecks) {
-      assert.ok(check.passed, `Hard check "${check.rule}" should pass: ${check.detail}`);
+    const requiredChecks = assessment.checks.filter(c => c.binding === 'required');
+    for (const check of requiredChecks) {
+      assert.ok(check.passed, `Required check "${check.rule}" should pass: ${check.detail}`);
     }
   });
 

@@ -39,6 +39,15 @@ export interface RunParams {
   instructions?: string
   seedDir?: string
   systemPrompt?: string
+  // Gate metadata (Phase 7A)
+  strategy?: string
+  gateBypass?: boolean
+  gateSummary?: Record<string, unknown>
+  waivers?: Array<{ rule: string; justification: string; timestamp: string }>
+  // Deep analysis metadata (Phase 7B)
+  deepAnalysis?: Array<{ heuristic: string; value: string | number; level: string; detail: string }>
+  strategySuggested?: string
+  strategySelected?: string
 }
 
 export async function postRun(body: RunParams): Promise<{ runId?: string; message?: string }> {

@@ -1,0 +1,22 @@
+{
+  "description": "Add a TEST tab to the CRUCIBLE header navigation bar",
+  "instructions": "Add a new 'Test' tab to the navigation bar in ui/src/components/NavBar.tsx. The tab should appear after the 'Graphs' tab. It should link to '/test'. Also create a minimal placeholder page at ui/src/pages/Test.tsx that shows a heading 'Test' and a brief placeholder message. Register the route in ui/src/main.tsx. Run the frontend build with: cd ui && npx tsc -b && npx vite build to verify no errors.",
+  "files": {},
+  "checks": [
+    {
+      "name": "visible: NavBar includes Test tab",
+      "type": "exec",
+      "command": "grep -q 'Test' /home/user/ui/src/components/NavBar.tsx && grep -q '/test' /home/user/ui/src/components/NavBar.tsx"
+    },
+    {
+      "name": "visible: Test page exists",
+      "type": "exec",
+      "command": "test -f /home/user/ui/src/pages/Test.tsx"
+    },
+    {
+      "name": "visible: route registered",
+      "type": "exec",
+      "command": "grep -q '/test' /home/user/ui/src/main.tsx"
+    }
+  ]
+}

@@ -25,6 +25,7 @@ import { detectFlowType } from './GraphExecutor.js';
 import { getFlowTemplate } from '../session/flow-templates.js';
 import { createRunRecord } from '../session/run-record.js';
 import { runClaudeCliAgent, type CliAgentResult } from '../agents/cli-runner.js';
+import { generateRunDiff, initSeedRepo } from './diff.js';
 import { DockerRunner } from '../sandbox/docker-runner.js';
 import type { SessionModel } from '../session/index.js';
 import type { ScoreResult } from '../types/index.js';
@@ -457,6 +458,19 @@ export class RunEngine extends EventEmitter {
         }
       }
 
+      // Capture git diff from container before flush/destroy (Phase 8A)
+      let diffResult: Awaited<ReturnType<typeof generateRunDiff>> = null;
+      try {
+        const patchContent = runner.captureGitDiff();
+        if (patchContent) {
+          diffResult = await generateRunDiff(runId, undefined, patchContent);
+        }
+      } catch (err) {
+        this.emitRunEvent(runId, 'diff_error', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
       // Flush artifacts from container to host
       const artifactManifest = await runner.flushArtifacts(runId);
 
@@ -478,6 +492,7 @@ export class RunEngine extends EventEmitter {
         startedAt: startedAt.toISOString(),
         completedAt: completedAt.toISOString(),
         artifacts: artifactManifest,
+        diff: diffResult ? { patchPath: diffResult.patchPath, stats: diffResult.stats } : undefined,
         metadata: {
           ...(scoreResult ? { scores: scoreResult } : {}),
           cliSessionId: cliResult.sessionId,
@@ -594,6 +609,13 @@ export class RunEngine extends EventEmitter {
         await this.copySeedDir(config.taskPayload.seedDir, workDir);
       }
 
+      // Init git repo with seed commit for diff generation (Phase 8A)
+      try {
+        await initSeedRepo(workDir);
+      } catch {
+        // Non-fatal — diff generation will be skipped if this fails
+      }
+
       // Build system prompt with flow template
       let systemPrompt = (agentConfig?.systemPrompt as string) ?? '';
       if (this.session) {
@@ -704,6 +726,16 @@ export class RunEngine extends EventEmitter {
         }
       }
 
+      // Generate diff from workdir git repo (Phase 8A) — before artifact flush/cleanup
+      let diffResult: Awaited<ReturnType<typeof generateRunDiff>> = null;
+      try {
+        diffResult = await generateRunDiff(runId, workDir);
+      } catch (err) {
+        this.emitRunEvent(runId, 'diff_error', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
       // Flush artifacts — copy workdir files to runs/<runId>/artifacts/
       const artifactDir = path.join('runs', runId, 'artifacts');
       await fs.mkdir(artifactDir, { recursive: true });
@@ -727,6 +759,7 @@ export class RunEngine extends EventEmitter {
         startedAt: startedAt.toISOString(),
         completedAt: completedAt.toISOString(),
         artifacts: { outputDir: artifactDir, files: [] },
+        diff: diffResult ? { patchPath: diffResult.patchPath, stats: diffResult.stats } : undefined,
         metadata: {
           ...(scoreResult ? { scores: scoreResult } : {}),
           cliSessionId: cliResult.sessionId,

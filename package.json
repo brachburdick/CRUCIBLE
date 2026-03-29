@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit",
     "serve": "node dist/server/serve.js",
     "compare": "node dist/cli/compare.js",
-    "test": "node --test dist/test/phase0.test.js dist/test/phase1.test.js dist/test/phase2.test.js dist/test/session.test.js dist/test/phase3.test.js dist/test/phase5.test.js dist/test/runtime-detect.test.js dist/test/docker-integration.test.js",
+    "test": "node --test dist/test/phase0.test.js dist/test/phase1.test.js dist/test/phase2.test.js dist/test/session.test.js dist/test/phase3.test.js dist/test/phase5.test.js dist/test/runtime-detect.test.js dist/test/docker-integration.test.js dist/test/strategy-selector.test.js dist/test/diff.test.js",
     "test:integration": "./scripts/integration-test.sh",
     "docker:build": "./scripts/build-docker-images.sh",
     "docker:test": "./scripts/test-docker-images.sh"

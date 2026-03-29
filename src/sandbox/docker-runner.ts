@@ -246,6 +246,29 @@ export class DockerRunner {
    * Stop and remove the container. Idempotent — safe to call multiple times.
    * Never throws — errors are logged but swallowed.
    */
+
+  /**
+   * Capture `git diff HEAD` from inside the container (Phase 8A).
+   * Must be called before destroy(). Returns the raw patch string,
+   * or empty string if diff capture fails.
+   */
+  captureGitDiff(): string {
+    if (this.destroyed) return '';
+    try {
+      // Stage all changes first (including untracked), then diff
+      execSync(
+        `docker exec -w ${CONTAINER_WORKDIR} ${this.containerId} git add -A`,
+        { timeout: 10000, stdio: 'ignore' },
+      );
+      return execSync(
+        `docker exec -w ${CONTAINER_WORKDIR} ${this.containerId} git diff --cached HEAD`,
+        { encoding: 'utf-8', timeout: 15000, maxBuffer: 10 * 1024 * 1024 },
+      );
+    } catch {
+      return '';
+    }
+  }
+
   async destroy(): Promise<void> {
     if (this.destroyed) return;
     this.destroyed = true;
@@ -481,6 +504,16 @@ export class DockerRunner {
       );
     } catch {
       // Best effort — entrypoint drops to agent user anyway
+    }
+
+    // Init git repo with seed commit for diff generation (Phase 8A)
+    try {
+      execSync(
+        `docker exec -w ${CONTAINER_WORKDIR} ${this.containerId} sh -c "git init -q && git add -A && git -c user.name=crucible -c user.email=crucible@harness commit -q -m seed --allow-empty"`,
+        { timeout: 15000, stdio: 'ignore' },
+      );
+    } catch {
+      // Non-fatal — diff generation will be skipped
     }
   }
 

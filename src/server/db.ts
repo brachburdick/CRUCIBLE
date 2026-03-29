@@ -32,6 +32,18 @@ CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
 CREATE INDEX IF NOT EXISTS idx_runs_started_at ON runs(started_at);
 `;
 
+/** Auto-migration: add Phase 8A columns if they don't exist. */
+function migratePhase8A(db: Database.Database): void {
+  const cols = db.prepare("PRAGMA table_info(runs)").all() as Array<{ name: string }>;
+  const colNames = new Set(cols.map(c => c.name));
+  if (!colNames.has('applied_at')) {
+    db.exec('ALTER TABLE runs ADD COLUMN applied_at TEXT');
+  }
+  if (!colNames.has('applied_mode')) {
+    db.exec('ALTER TABLE runs ADD COLUMN applied_mode TEXT');
+  }
+}
+
 export function openDatabase(dbPath?: string): Database.Database {
   const resolvedPath = dbPath ?? path.join('data', 'crucible.db');
   const dir = path.dirname(resolvedPath);
@@ -43,6 +55,7 @@ export function openDatabase(dbPath?: string): Database.Database {
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   db.exec(SCHEMA);
+  migratePhase8A(db);
   return db;
 }
 
@@ -62,6 +75,8 @@ export interface RunRow {
   wall_time_ms: number | null;
   started_at: string;
   completed_at: string | null;
+  applied_at: string | null;
+  applied_mode: string | null;
 }
 
 export interface RunEventRow {
@@ -145,6 +160,12 @@ export function getRun(db: Database.Database, id: string): RunRow | undefined {
 
 export function getRunEvents(db: Database.Database, runId: string): RunEventRow[] {
   return db.prepare('SELECT * FROM run_events WHERE run_id = ? ORDER BY id ASC').all(runId) as RunEventRow[];
+}
+
+export function markRunApplied(db: Database.Database, id: string, mode: string): void {
+  db.prepare(`
+    UPDATE runs SET applied_at = ?, applied_mode = ? WHERE id = ?
+  `).run(new Date().toISOString(), mode, id);
 }
 
 export function cleanupStaleRuns(db: Database.Database): number {
