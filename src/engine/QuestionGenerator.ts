@@ -88,6 +88,30 @@ const QUESTION_TEMPLATES: Record<string, {
     default: 'Medium (new feature, moderate scope)',
     impact: 'Risk classification determines oversight level and approval gates',
   },
+  exploration_question_clear: {
+    question: 'What is the specific exploration question this task should answer? Phrase it so it has a definitive yes/no or conditional answer.',
+    options: [
+      'Is X possible in the current codebase?',
+      'Does Y support Z?',
+      'What is the most efficient approach to W?',
+      'How does A compare to B in terms of C?',
+    ],
+    default: 'Is X possible in the current codebase?',
+    impact: 'Without a precise question the exploration has no termination condition and cannot be evaluated',
+  },
+  assessment_scope_defined: {
+    question: 'What section or component are we assessing, and which dimensions matter? Name at least one dimension.',
+    options: [
+      'Correctness (tests pass, behavior is correct)',
+      'Performance (latency, throughput)',
+      'Maintainability (complexity, technical debt)',
+      'Security (vulnerabilities, exposure surface)',
+      'Coverage (test coverage %)',
+      'API stability (interface changes, contract violations)',
+    ],
+    default: 'Correctness (tests pass, behavior is correct)',
+    impact: 'Without section and dimensions the assessment has no measurement target and cannot produce actionable findings',
+  },
 };
 
 let questionCounter = 0;

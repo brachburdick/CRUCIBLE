@@ -154,7 +154,7 @@ export const DEFAULT_MUTATION_BUDGET_CONFIG: MutationBudgetConfig = {
 
 // ─── Flow Templates ───
 
-export type FlowType = 'debug' | 'feature' | 'refactor';
+export type FlowType = 'debug' | 'feature' | 'refactor' | 'exploration' | 'assessment';
 
 export interface FlowPhase {
   name: string;

@@ -30,6 +30,7 @@ interface ProjectTask {
   riskLevel?: string
   blockedBy?: string[]
   flowPhase?: string
+  layer?: 'pipeline' | 'meta-project' | 'project'
 }
 
 interface ProjectQuestion {
@@ -201,14 +202,62 @@ function ProjectTaskList({ projectName, projectPath }: { projectName: string; pr
   )
 }
 
+// ─── Layer Badge ───────────────────────────────────────────────────────
+
+type LayerValue = 'pipeline' | 'meta-project' | 'project'
+
+const LAYER_STYLES: Record<LayerValue, string> = {
+  pipeline:      'bg-slate-500/20 text-slate-400 border-slate-500/30',
+  'meta-project': 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+  project:       'bg-green-500/20 text-green-400 border-green-500/30',
+}
+
+function LayerBadge({ layer }: { layer?: LayerValue }) {
+  const l = layer ?? 'project'
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${LAYER_STYLES[l]}`}>
+      {l}
+    </span>
+  )
+}
+
 // ─── All Tasks Tab ─────────────────────────────────────────────────────
 
 function AllTasksTab() {
   const [filter, setFilter] = useState('pending')
+  const [layerFilter, setLayerFilter] = useState<Set<LayerValue>>(new Set(['meta-project', 'project']))
   const { data: tasks } = useFetch<ProjectTask[]>(`/api/projects/tasks?status=${filter}`, [filter])
+
+  function toggleLayer(layer: LayerValue) {
+    setLayerFilter(prev => {
+      const next = new Set(prev)
+      next.has(layer) ? next.delete(layer) : next.add(layer)
+      return next
+    })
+  }
+
+  const visibleTasks = tasks?.filter(t => layerFilter.has((t.layer ?? 'project') as LayerValue))
 
   return (
     <div>
+      {/* Layer filter */}
+      <div className="flex gap-2 mb-3">
+        {(['pipeline', 'meta-project', 'project'] as LayerValue[]).map(l => (
+          <button
+            key={l}
+            onClick={() => toggleLayer(l)}
+            className={`px-3 py-1 rounded text-xs font-medium transition-colors border ${
+              layerFilter.has(l)
+                ? LAYER_STYLES[l]
+                : 'text-slate-600 border-slate-700 hover:text-slate-400'
+            }`}
+          >
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {/* Status filter */}
       <div className="flex gap-2 mb-4">
         {['pending', 'in_progress', 'complete', 'blocked'].map(s => (
           <button
@@ -227,8 +276,8 @@ function AllTasksTab() {
 
       {!tasks ? (
         <p className="text-slate-500 text-sm">Loading...</p>
-      ) : tasks.length === 0 ? (
-        <p className="text-slate-500 text-sm">No {filter.replace('_', ' ')} tasks.</p>
+      ) : !visibleTasks || visibleTasks.length === 0 ? (
+        <p className="text-slate-500 text-sm">No {filter.replace('_', ' ')} tasks in selected layers.</p>
       ) : (
         <table className="w-full text-sm">
           <thead>
@@ -236,17 +285,19 @@ function AllTasksTab() {
               <th className="px-3 py-2 font-medium">Project</th>
               <th className="px-3 py-2 font-medium">ID</th>
               <th className="px-3 py-2 font-medium">Description</th>
+              <th className="px-3 py-2 font-medium">Layer</th>
               <th className="px-3 py-2 font-medium">Type</th>
               <th className="px-3 py-2 font-medium">Priority</th>
               <th className="px-3 py-2 font-medium">Phase</th>
             </tr>
           </thead>
           <tbody>
-            {tasks.map(t => (
+            {visibleTasks.map(t => (
               <tr key={`${t.project}-${t.id}`} className="border-b border-slate-800/50 hover:bg-slate-800/30">
                 <td className="px-3 py-2 text-orange-400 text-xs font-medium">{t.project}</td>
                 <td className="px-3 py-2 font-mono text-xs text-slate-400">{t.id}</td>
                 <td className="px-3 py-2 text-slate-300 max-w-sm truncate">{t.description ?? t.summary}</td>
+                <td className="px-3 py-2"><LayerBadge layer={t.layer} /></td>
                 <td className="px-3 py-2 text-slate-500 text-xs">{t.taskType}</td>
                 <td className="px-3 py-2">{t.priority && <PriorityBadge priority={t.priority} />}</td>
                 <td className="px-3 py-2 text-slate-500 text-xs">{t.flowPhase}</td>

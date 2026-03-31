@@ -399,6 +399,8 @@ export default function LaunchForm({ onLaunched, preFill }: LaunchFormProps) {
           >
             <option value="Implementation">Implementation</option>
             <option value="Diagnostic">Diagnostic</option>
+            <option value="Exploration">Exploration (Is X possible?)</option>
+            <option value="Assessment">Assessment (How is this working?)</option>
           </select>
         </div>
       )}

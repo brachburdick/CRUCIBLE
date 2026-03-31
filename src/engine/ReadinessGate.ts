@@ -10,6 +10,7 @@ import type { DecompositionNode, ReadinessAssessment, ReadinessCheck, QuestionRe
 import { emptyReadiness } from '../types/graph.js';
 import { baseLlmCall } from './llm.js';
 import type { DeepCheck } from './StrategySelector.js';
+import type { FlowType } from '../session/types.js';
 
 export interface ReadinessGateConfig {
   gateMode: 'hard-block' | 'triage';
@@ -43,8 +44,8 @@ export class ReadinessGate {
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
 
-  async assess(task: TaskPayload): Promise<ReadinessAssessment> {
-    const checks = this.runGlobalChecks(task);
+  async assess(task: TaskPayload, flowType?: FlowType): Promise<ReadinessAssessment> {
+    const checks = this.runChecksForFlow(task, flowType);
     return this.buildAssessment(checks);
   }
 
@@ -162,6 +163,69 @@ architectural_scope: "localized" if changes stay within one module boundary, "ar
       this.checkAmbiguousTerms(task),
       this.checkRiskClassified(task),
     ];
+  }
+
+  /**
+   * Returns the applicable checks for a given flow type.
+   * Some checks are irrelevant for certain flows (e.g., acceptance criteria
+   * for exploration) and are omitted so they don't penalise the score.
+   * Flow-specific checks are appended after the global ones.
+   */
+  private runChecksForFlow(task: TaskPayload, flowType?: FlowType): ReadinessCheck[] {
+    // Checks to skip per flow type (by rule name)
+    const SKIP: Record<string, string[]> = {
+      debug:       ['has_acceptance_criteria'],
+      feature:     [],
+      refactor:    ['has_acceptance_criteria'],
+      exploration: ['has_acceptance_criteria', 'has_verification_command', 'dependencies_resolved', 'risk_classified'],
+      assessment:  ['has_acceptance_criteria', 'has_verification_command', 'dependencies_resolved', 'risk_classified'],
+    };
+
+    const skipRules = flowType ? (SKIP[flowType] ?? []) : [];
+    const global = this.runGlobalChecks(task).filter(c => !skipRules.includes(c.rule));
+
+    // Flow-specific checks
+    const extra: ReadinessCheck[] = [];
+    if (flowType === 'exploration') extra.push(this.checkExplorationQuestionClear(task));
+    if (flowType === 'assessment')  extra.push(this.checkAssessmentScopeDefined(task));
+
+    return [...global, ...extra];
+  }
+
+  private checkExplorationQuestionClear(task: TaskPayload): ReadinessCheck {
+    const text = `${task.description} ${task.instructions ?? ''}`;
+    const hasQuestion = /\?/.test(text);
+    const hasEvidenceLanguage = /\b(is\s+.+possible|can\s+.+be\s+done|does\s+.+support|evidence\s+would|would\s+constitute|feasib|viable)\b/i.test(text);
+
+    return {
+      rule: 'exploration_question_clear',
+      source: 'global',
+      binding: 'required',
+      passed: hasQuestion || hasEvidenceLanguage,
+      detail: hasQuestion
+        ? 'Exploration question identified (contains "?")'
+        : hasEvidenceLanguage
+          ? 'Evidence language found — question is answerable'
+          : 'No clear exploration question found. Rephrase as "Is X possible?" or define what evidence would constitute an answer.',
+    };
+  }
+
+  private checkAssessmentScopeDefined(task: TaskPayload): ReadinessCheck {
+    const text = `${task.description} ${task.instructions ?? ''}`.toLowerCase();
+    const hasDimension = /\b(correctness|performance|maintainability|security|coverage|stability|test|latency|throughput|complexity|debt|vulnerability)\b/.test(text);
+    const hasSection = /\b(module|component|section|service|layer|package|file|class|function|endpoint|route)\b/.test(text);
+
+    return {
+      rule: 'assessment_scope_defined',
+      source: 'global',
+      binding: 'required',
+      passed: hasDimension && hasSection,
+      detail: hasDimension && hasSection
+        ? 'Section and assessment dimension both identified'
+        : !hasSection
+          ? 'No section or component specified. Name what is being assessed.'
+          : 'No assessment dimension specified. Add at least one: correctness, performance, maintainability, security, coverage, or stability.',
+    };
   }
 
   private checkAcceptanceCriteria(task: TaskPayload): ReadinessCheck {

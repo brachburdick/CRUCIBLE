@@ -1,9 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { ReadinessGate } from '../../engine/ReadinessGate.js';
 import { selectStrategy } from '../../engine/StrategySelector.js';
-import type { DeepCheck, CascadeResult } from '../../engine/StrategySelector.js';
+import type { DeepCheck, CascadeResult, CascadeInput } from '../../engine/StrategySelector.js';
 import type { TaskPayload } from '../../types/index.js';
 import type { ReadinessAssessment } from '../../types/graph.js';
+import type { FlowType } from '../../session/types.js';
 
 /** Human-readable label map for enrichment formatting */
 const RULE_LABELS: Record<string, string> = {
@@ -13,7 +14,28 @@ const RULE_LABELS: Record<string, string> = {
   risk_classified: 'Risk Classification',
   dependencies_resolved: 'Dependencies',
   no_ambiguous_terms: 'Ambiguous Terms',
+  exploration_question_clear: 'Exploration Question',
+  assessment_scope_defined: 'Assessment Scope',
 };
+
+/** Map LaunchForm taskIntent values to ReadinessGate FlowType */
+function toFlowType(intent: string | undefined): FlowType | undefined {
+  const map: Record<string, FlowType> = {
+    implementation: 'feature',
+    diagnostic:     'debug',
+    exploration:    'exploration',
+    assessment:     'assessment',
+  };
+  return intent ? map[intent.toLowerCase()] : undefined;
+}
+
+/** Map LaunchForm taskIntent values to StrategySelector intent */
+function toStrategyIntent(intent: string | undefined): CascadeInput['taskIntent'] {
+  const lower = intent?.toLowerCase();
+  if (lower === 'exploration' || lower === 'assessment') return lower;
+  if (lower === 'diagnostic') return 'diagnostic';
+  return 'implementation';
+}
 
 /**
  * Build enriched instructions by appending operator clarifications.
@@ -42,7 +64,7 @@ interface ReadinessRequest {
   checks?: Array<{ name: string; type: 'exec'; command: string }>;
   enrichments?: Record<string, string>;
   deep?: boolean;
-  taskIntent?: 'implementation' | 'diagnostic';
+  taskIntent?: 'implementation' | 'diagnostic' | 'exploration' | 'assessment';
 }
 
 interface ReadinessResponse {
@@ -74,7 +96,8 @@ export function registerReadinessRoutes(app: FastifyInstance): void {
       checks: checks || undefined,
     };
 
-    const assessment = await gate.assess(taskPayload);
+    const flowType = toFlowType(taskIntent);
+    const assessment = await gate.assess(taskPayload, flowType);
 
     // Compute passable: all required pass, all waivable either pass or are waived
     const requiredChecks = assessment.checks.filter(c => c.binding === 'required');
@@ -96,8 +119,7 @@ export function registerReadinessRoutes(app: FastifyInstance): void {
         response.deepChecks = deepChecks;
 
         if (deepChecks.length > 0) {
-          const intent = taskIntent ?? 'implementation';
-          response.strategy = selectStrategy({ checks: deepChecks, taskIntent: intent });
+          response.strategy = selectStrategy({ checks: deepChecks, taskIntent: toStrategyIntent(taskIntent) });
         }
       } catch {
         // Deep analysis failure is non-blocking — return fast checks only

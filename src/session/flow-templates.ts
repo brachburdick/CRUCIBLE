@@ -221,12 +221,140 @@ export const REFACTOR_FLOW: FlowTemplate = {
   rules: REFACTOR_RULES,
 };
 
+// ─── Exploration Flow ───
+// Frame -> Research -> Hypothesize -> Validate -> Document
+
+const EXPLORATION_PHASES: FlowPhase[] = [
+  {
+    name: 'frame',
+    description: 'Confirm the exploration question is specific and answerable. Identify evidence sources.',
+    entryGates: ['task_claimed'],
+    exitGates: ['question_confirmed', 'evidence_sources_identified'],
+  },
+  {
+    name: 'research',
+    description: 'Gather evidence: read code, docs, prior runs. Collect concrete findings.',
+    entryGates: ['question_confirmed'],
+    exitGates: ['evidence_collected'],
+  },
+  {
+    name: 'hypothesize',
+    description: 'Form an initial answer with a confidence level (high/medium/low).',
+    entryGates: ['evidence_collected'],
+    exitGates: ['initial_answer_formed', 'confidence_level_set'],
+  },
+  {
+    name: 'validate',
+    description: 'Test the hypothesis: trace code paths, run experiments, or consult additional sources.',
+    entryGates: ['initial_answer_formed'],
+    exitGates: ['hypothesis_tested'],
+  },
+  {
+    name: 'document',
+    description: 'Write findings document: answer, evidence, confidence, follow-on implications.',
+    entryGates: ['hypothesis_tested'],
+    exitGates: ['findings_document_written', 'run_record_written'],
+  },
+];
+
+const EXPLORATION_RULES: FlowRule[] = [
+  {
+    name: 'question_must_be_answerable',
+    description: 'The exploration question must be specific enough to have a definitive answer.',
+    enforcement: 'hard',
+  },
+  {
+    name: 'evidence_before_conclusion',
+    description: 'Hypothesize phase cannot start without collected evidence.',
+    enforcement: 'hard',
+  },
+  {
+    name: 'no_code_changes',
+    description: 'Exploration should not modify production code. File a separate task for any fixes found.',
+    enforcement: 'advisory',
+  },
+  {
+    name: 'context_gate',
+    description: 'End session with result: "partial" if turn count > 40 or context degradation detected.',
+    enforcement: 'hard',
+  },
+];
+
+export const EXPLORATION_FLOW: FlowTemplate = {
+  type: 'exploration',
+  description: 'Frame -> Research -> Hypothesize -> Validate -> Document. Answer the question with evidence.',
+  phases: EXPLORATION_PHASES,
+  rules: EXPLORATION_RULES,
+};
+
+// ─── Assessment Flow ───
+// Inventory -> Measure -> Analyze -> Report
+
+const ASSESSMENT_PHASES: FlowPhase[] = [
+  {
+    name: 'inventory',
+    description: 'Map the section: entry points, dependencies, owned paths, test coverage.',
+    entryGates: ['task_claimed'],
+    exitGates: ['section_mapped', 'dimensions_confirmed'],
+  },
+  {
+    name: 'measure',
+    description: 'Run diagnostics: tests, linters, coverage tools, profilers. Collect metrics.',
+    entryGates: ['section_mapped'],
+    exitGates: ['diagnostics_run', 'metrics_collected'],
+  },
+  {
+    name: 'analyze',
+    description: 'Interpret results against baseline. Identify gaps and risk hotspots.',
+    entryGates: ['diagnostics_run'],
+    exitGates: ['gaps_identified', 'risk_hotspots_flagged'],
+  },
+  {
+    name: 'report',
+    description: 'Write assessment report: dimension scores, findings, recommendations, follow-on tasks.',
+    entryGates: ['gaps_identified'],
+    exitGates: ['assessment_report_written', 'run_record_written'],
+  },
+];
+
+const ASSESSMENT_RULES: FlowRule[] = [
+  {
+    name: 'scope_before_measurement',
+    description: 'Section and dimensions must be confirmed before measurement begins.',
+    enforcement: 'hard',
+  },
+  {
+    name: 'no_code_changes',
+    description: 'Assessment must not modify production code. Zero-risk by definition.',
+    enforcement: 'hard',
+  },
+  {
+    name: 'baseline_referenced',
+    description: 'Results should be interpreted against a stated baseline (prior assessment, SLA, or best practice).',
+    enforcement: 'advisory',
+  },
+  {
+    name: 'context_gate',
+    description: 'End session with result: "partial" if turn count > 40 or context degradation detected.',
+    enforcement: 'hard',
+  },
+];
+
+export const ASSESSMENT_FLOW: FlowTemplate = {
+  type: 'assessment',
+  description: 'Inventory -> Measure -> Analyze -> Report. Measure quality against baseline, no code changes.',
+  phases: ASSESSMENT_PHASES,
+  rules: ASSESSMENT_RULES,
+};
+
 // ─── Flow Registry ───
 
 const FLOW_REGISTRY: Map<FlowType, FlowTemplate> = new Map([
   ['debug', DEBUG_FLOW],
   ['feature', FEATURE_FLOW],
   ['refactor', REFACTOR_FLOW],
+  ['exploration', EXPLORATION_FLOW],
+  ['assessment', ASSESSMENT_FLOW],
 ]);
 
 /** Get the flow template for a given flow type. */

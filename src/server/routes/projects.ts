@@ -35,7 +35,36 @@ interface ProjectTask {
   riskLevel?: string;
   blockedBy?: string[];
   flowPhase?: string;
+  layer?: 'pipeline' | 'meta-project' | 'project';
   [key: string]: unknown;
+}
+
+/**
+ * Infer the UI layer for a task from its metadata.
+ * Explicit `layer` field wins. Otherwise inferred from project name + taskType + id range.
+ */
+function inferLayer(task: Record<string, unknown>, projectName: string): 'pipeline' | 'meta-project' | 'project' {
+  // Explicit field wins
+  const explicit = task.layer as string | undefined;
+  if (explicit === 'pipeline' || explicit === 'meta-project' || explicit === 'project') return explicit;
+
+  // Non-CRUCIBLE projects are always project-level execution tasks
+  if (projectName !== 'CRUCIBLE') return 'project';
+
+  // CRUCIBLE infrastructure tasks (001–015)
+  const idMatch = (task.id as string | undefined)?.match(/^task-(\d+)$/);
+  if (idMatch) {
+    const n = parseInt(idMatch[1], 10);
+    if (n >= 1 && n <= 15) return 'pipeline';
+  }
+
+  // investigation taskType → meta-project (planning, design, research)
+  if (task.taskType === 'investigation') return 'meta-project';
+
+  // documentation on CRUCIBLE → pipeline (e.g. task-015 README)
+  if (task.taskType === 'documentation') return 'pipeline';
+
+  return 'project';
 }
 
 interface ProjectQuestion {
@@ -186,6 +215,7 @@ export function registerProjectRoutes(app: FastifyInstance, projectsDir: string)
           riskLevel: task.riskLevel as string | undefined,
           blockedBy: task.blockedBy as string[] | undefined,
           flowPhase: task.flowPhase as string | undefined,
+          layer: inferLayer(task, p.name),
         };
 
         if (!status || t.status === status) {

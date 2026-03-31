@@ -20,7 +20,7 @@ export interface DeepCheck {
 
 export interface CascadeInput {
   checks: DeepCheck[];
-  taskIntent: 'implementation' | 'diagnostic';
+  taskIntent: 'implementation' | 'diagnostic' | 'exploration' | 'assessment';
 }
 
 export interface CascadeResult {
@@ -48,11 +48,13 @@ function numericValue(check: DeepCheck | undefined): number {
 export function selectStrategy(input: CascadeInput): CascadeResult {
   const { checks, taskIntent } = input;
 
-  // 1. Diagnostic task → D0
-  if (taskIntent === 'diagnostic') {
+  // 1. Diagnostic / exploration / assessment → D0
+  if (taskIntent === 'diagnostic' || taskIntent === 'exploration' || taskIntent === 'assessment') {
     return {
       suggested: 'D0',
-      reason: 'Diagnostic tasks need freedom to follow leads',
+      reason: taskIntent === 'diagnostic'
+        ? 'Diagnostic tasks need freedom to follow leads'
+        : `${taskIntent.charAt(0).toUpperCase() + taskIntent.slice(1)} tasks need freedom to follow leads`,
       flags: { humanReviewRecommended: false, planningFirstSubtask: false },
     };
   }
